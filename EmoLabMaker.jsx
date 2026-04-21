@@ -1,4 +1,4 @@
-/**
+﻿/**
  * EmoLabMaker.jsx
  * @version 1.2.1
  * @description レイヤー選択 + 口パク 統合パネル
@@ -854,6 +854,87 @@
   var phonemeData = [];
   var labFile = null;
 
+  // ExtendScript では記号キーを持つオブジェクト列挙が不安定なため、音素集合は配列ベースで保持
+  function findPhonemeEntry(entries, name) {
+    for (var i = 0; i < entries.length; i++) {
+      if (entries[i].phoneme === name) return entries[i];
+    }
+    return null;
+  }
+
+  function findOrCreatePhonemeEntry(entries, name) {
+    var entry = findPhonemeEntry(entries, name);
+    if (entry) return entry;
+
+    entry = { phoneme: name, count: 0, times: [] };
+    entries.push(entry);
+    return entry;
+  }
+
+  function isCommonPhoneme(name) {
+    for (var i = 0; i < commonPhonemes.length; i++) {
+      if (commonPhonemes[i] === name) return true;
+    }
+    return false;
+  }
+
+  function parseLabPhonemeEntries(content) {
+    var lines = content.split(/\r?\n/);
+    var entries = [];
+
+    for (var i = 0; i < lines.length; i++) {
+      var trimmed = lines[i].replace(/^\s+|\s+$/g, "");
+      if (trimmed.length === 0) continue;
+
+      var parts = trimmed.split(/\s+/);
+      if (parts.length < 3) continue;
+
+      var startTime = parseFloat(parts[0]) / 10000000;
+      var endTime = parseFloat(parts[1]) / 10000000;
+      if (isNaN(startTime) || isNaN(endTime)) continue;
+
+      var entry = findOrCreatePhonemeEntry(entries, parts[2]);
+      entry.count++;
+      entry.times.push({ start: startTime, end: endTime });
+    }
+
+    return entries;
+  }
+
+  // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
+  function buildSortedPhonemeList(entries) {
+    var sorted = [];
+    var otherPhonemes = [];
+
+    for (var i = 0; i < commonPhonemes.length; i++) {
+      var commonEntry = findPhonemeEntry(entries, commonPhonemes[i]);
+      if (commonEntry && commonEntry.count > 0) {
+        sorted.push({
+          phoneme: commonEntry.phoneme,
+          count: commonEntry.count,
+          data: commonEntry,
+        });
+      }
+    }
+
+    for (var j = 0; j < entries.length; j++) {
+      var entry = entries[j];
+      if (entry.count <= 0 || isCommonPhoneme(entry.phoneme)) continue;
+
+      otherPhonemes.push({
+        phoneme: entry.phoneme,
+        count: entry.count,
+        data: entry,
+      });
+    }
+
+    otherPhonemes.sort(function (a, b) {
+      return b.count - a.count;
+    });
+
+    return sorted.concat(otherPhonemes);
+  }
+
   // ========== 一括選択ボタングループ ==========
   var phonemeSelectorGroup = phonemeListPanel.add("group");
   phonemeSelectorGroup.orientation = "row";
@@ -996,76 +1077,9 @@
     var content = labFile.read();
     labFile.close();
 
-    var lines = content.split(/\r?\n/);
-    var phonemeEntries = [];
+    var phonemeEntries = parseLabPhonemeEntries(content);
 
-    function findOrCreateEntry(name) {
-      for (var ei = 0; ei < phonemeEntries.length; ei++) {
-        if (phonemeEntries[ei].phoneme === name) return phonemeEntries[ei];
-      }
-      var entry = { phoneme: name, count: 0, times: [] };
-      phonemeEntries.push(entry);
-      return entry;
-    }
-
-    for (var i = 0; i < lines.length; i++) {
-      var trimmed = lines[i].replace(/^\s+|\s+$/g, "");
-      if (trimmed.length === 0) continue;
-      var parts = trimmed.split(/\s+/);
-      if (parts.length >= 3) {
-        var startTime = parseFloat(parts[0]) / 10000000;
-        var endTime = parseFloat(parts[1]) / 10000000;
-        var phoneme = parts[2];
-
-        var entry = findOrCreateEntry(phoneme);
-        entry.count++;
-        entry.times.push({ start: startTime, end: endTime });
-      }
-    }
-
-    // 音素を優先順にソート
-    var sortedPhonemes = [];
-
-    // 1. よく使う音素を優先（存在するもののみ）
-    for (var i = 0; i < commonPhonemes.length; i++) {
-      for (var ei = 0; ei < phonemeEntries.length; ei++) {
-        if (
-          phonemeEntries[ei].phoneme === commonPhonemes[i] &&
-          phonemeEntries[ei].count > 0
-        ) {
-          sortedPhonemes.push({
-            phoneme: phonemeEntries[ei].phoneme,
-            count: phonemeEntries[ei].count,
-          });
-          break;
-        }
-      }
-    }
-
-    // 2. それ以外の音素を出現回数の多い順に追加
-    var otherPhonemes = [];
-    for (var ei = 0; ei < phonemeEntries.length; ei++) {
-      var isCommon = false;
-      for (var j = 0; j < commonPhonemes.length; j++) {
-        if (phonemeEntries[ei].phoneme === commonPhonemes[j]) {
-          isCommon = true;
-          break;
-        }
-      }
-      if (!isCommon) {
-        otherPhonemes.push({
-          phoneme: phonemeEntries[ei].phoneme,
-          count: phonemeEntries[ei].count,
-        });
-      }
-    }
-
-    // 出現回数の多い順にソート（降順）
-    otherPhonemes.sort(function (a, b) {
-      return b.count - a.count;
-    });
-
-    sortedPhonemes = sortedPhonemes.concat(otherPhonemes);
+    var sortedPhonemes = buildSortedPhonemeList(phonemeEntries);
 
     // UI更新：既存のチェックボックスをクリア
     phonemeData = [];
@@ -1097,15 +1111,7 @@
       itemGroup.spacing = 2;
 
       var cb = itemGroup.add("checkbox", undefined, "");
-      cb.value = false;
-
-      // よく使う音素は初期選択
-      for (var j = 0; j < commonPhonemes.length; j++) {
-        if (phoneme === commonPhonemes[j]) {
-          cb.value = true;
-          break;
-        }
-      }
+      cb.value = isCommonPhoneme(phoneme);
 
       var label = itemGroup.add(
         "statictext",
@@ -1117,11 +1123,8 @@
       phonemeData.push({
         checkbox: cb,
         phoneme: phoneme,
-        data: (function (p) {
-          for (var ei = 0; ei < phonemeEntries.length; ei++) {
-            if (phonemeEntries[ei].phoneme === p) return phonemeEntries[ei];
-          }
-        })(phoneme),
+        // ここで元データ参照を保持しておくと、Create 時に再探索せず使える
+        data: sortedPhonemes[i].data,
       });
 
       colCount++;
@@ -1137,7 +1140,7 @@
     win.layout.layout(true);
     win.layout.resize();
 
-    createBtn.enabled = true;
+    createBtn.enabled = sortedPhonemes.length > 0;
   };
 
   // 全選択
