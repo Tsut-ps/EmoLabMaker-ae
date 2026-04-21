@@ -1,6 +1,6 @@
 /**
  * EmoLabMaker.jsx
- * @version 1.2.0
+ * @version 1.2.1
  * @description レイヤー選択 + 口パク 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
@@ -996,26 +996,30 @@
     var content = labFile.read();
     labFile.close();
 
-    var lines = content.split("\n");
-    var phonemeSet = {};
+    var lines = content.split(/\r?\n/);
+    var phonemeEntries = [];
+
+    function findOrCreateEntry(name) {
+      for (var ei = 0; ei < phonemeEntries.length; ei++) {
+        if (phonemeEntries[ei].phoneme === name) return phonemeEntries[ei];
+      }
+      var entry = { phoneme: name, count: 0, times: [] };
+      phonemeEntries.push(entry);
+      return entry;
+    }
 
     for (var i = 0; i < lines.length; i++) {
-      if (lines[i].length === 0) continue;
-      var parts = lines[i].split(/\s+/);
+      var trimmed = lines[i].replace(/^\s+|\s+$/g, "");
+      if (trimmed.length === 0) continue;
+      var parts = trimmed.split(/\s+/);
       if (parts.length >= 3) {
         var startTime = parseFloat(parts[0]) / 10000000;
         var endTime = parseFloat(parts[1]) / 10000000;
-        var phoneme = parts[2].replace(/^\s+|\s+$/g, "");
+        var phoneme = parts[2];
 
-        if (!phonemeSet[phoneme]) {
-          phonemeSet[phoneme] = {
-            phoneme: phoneme,
-            count: 0,
-            times: [],
-          };
-        }
-        phonemeSet[phoneme].count++;
-        phonemeSet[phoneme].times.push({ start: startTime, end: endTime });
+        var entry = findOrCreateEntry(phoneme);
+        entry.count++;
+        entry.times.push({ start: startTime, end: endTime });
       }
     }
 
@@ -1024,28 +1028,34 @@
 
     // 1. よく使う音素を優先（存在するもののみ）
     for (var i = 0; i < commonPhonemes.length; i++) {
-      if (phonemeSet[commonPhonemes[i]]) {
-        sortedPhonemes.push({
-          phoneme: commonPhonemes[i],
-          count: phonemeSet[commonPhonemes[i]].count,
-        });
+      for (var ei = 0; ei < phonemeEntries.length; ei++) {
+        if (
+          phonemeEntries[ei].phoneme === commonPhonemes[i] &&
+          phonemeEntries[ei].count > 0
+        ) {
+          sortedPhonemes.push({
+            phoneme: phonemeEntries[ei].phoneme,
+            count: phonemeEntries[ei].count,
+          });
+          break;
+        }
       }
     }
 
     // 2. それ以外の音素を出現回数の多い順に追加
     var otherPhonemes = [];
-    for (var phoneme in phonemeSet) {
+    for (var ei = 0; ei < phonemeEntries.length; ei++) {
       var isCommon = false;
       for (var j = 0; j < commonPhonemes.length; j++) {
-        if (phoneme === commonPhonemes[j]) {
+        if (phonemeEntries[ei].phoneme === commonPhonemes[j]) {
           isCommon = true;
           break;
         }
       }
       if (!isCommon) {
         otherPhonemes.push({
-          phoneme: phoneme,
-          count: phonemeSet[phoneme].count,
+          phoneme: phonemeEntries[ei].phoneme,
+          count: phonemeEntries[ei].count,
         });
       }
     }
@@ -1107,7 +1117,11 @@
       phonemeData.push({
         checkbox: cb,
         phoneme: phoneme,
-        data: phonemeSet[phoneme],
+        data: (function (p) {
+          for (var ei = 0; ei < phonemeEntries.length; ei++) {
+            if (phonemeEntries[ei].phoneme === p) return phonemeEntries[ei];
+          }
+        })(phoneme),
       });
 
       colCount++;
