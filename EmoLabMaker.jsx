@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.2.2
+ * @version 1.2.3
  * @description レイヤー選択 + 口パク 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
@@ -935,6 +935,12 @@
     return sorted.concat(otherPhonemes);
   }
 
+  function setPhonemeSelection(selector) {
+    for (var i = 0; i < phonemeData.length; i++) {
+      phonemeData[i].checkbox.value = selector(phonemeData[i]);
+    }
+  }
+
   // ========== 一括選択ボタングループ ==========
   var phonemeSelectorGroup = phonemeListPanel.add("group");
   phonemeSelectorGroup.orientation = "row";
@@ -1092,10 +1098,8 @@
     var colCount = 0;
 
     for (var i = 0; i < sortedPhonemes.length; i++) {
-      var phoneme = sortedPhonemes[i].phoneme;
-      var count = sortedPhonemes[i].count;
+      var item = sortedPhonemes[i];
 
-      // 3列ごとに新しい行を作成
       if (colCount === 0) {
         currentRow = phonemeCheckboxGroup.add("group");
         currentRow.orientation = "row";
@@ -1111,20 +1115,20 @@
       itemGroup.spacing = 2;
 
       var cb = itemGroup.add("checkbox", undefined, "");
-      cb.value = isCommonPhoneme(phoneme);
+      cb.value = isCommonPhoneme(item.phoneme);
 
       var label = itemGroup.add(
         "statictext",
         undefined,
-        phoneme + "(" + count + ")",
+        item.phoneme + "(" + item.count + ")",
       );
       label.minimumSize.width = 50;
 
       phonemeData.push({
         checkbox: cb,
-        phoneme: phoneme,
+        phoneme: item.phoneme,
         // ここで元データ参照を保持しておくと、Create 時に再探索せず使える
-        data: sortedPhonemes[i].data,
+        data: item.data,
       });
 
       colCount++;
@@ -1145,30 +1149,23 @@
 
   // 全選択
   selectAllBtn.onClick = function () {
-    for (var i = 0; i < phonemeData.length; i++) {
-      phonemeData[i].checkbox.value = true;
-    }
+    setPhonemeSelection(function () {
+      return true;
+    });
   };
 
   // 全解除
   deselectAllBtn.onClick = function () {
-    for (var i = 0; i < phonemeData.length; i++) {
-      phonemeData[i].checkbox.value = false;
-    }
+    setPhonemeSelection(function () {
+      return false;
+    });
   };
 
   // よく使うものを選択
   selectCommonBtn.onClick = function () {
-    for (var i = 0; i < phonemeData.length; i++) {
-      var isCommon = false;
-      for (var j = 0; j < commonPhonemes.length; j++) {
-        if (phonemeData[i].phoneme === commonPhonemes[j]) {
-          isCommon = true;
-          break;
-        }
-      }
-      phonemeData[i].checkbox.value = isCommon;
-    }
+    setPhonemeSelection(function (item) {
+      return isCommonPhoneme(item.phoneme);
+    });
   };
 
   // Phonemeレイヤー作成
@@ -1182,14 +1179,14 @@
     // 選択された音素のみ抽出
     var selectedPhonemes = [];
     for (var i = 0; i < phonemeData.length; i++) {
-      if (phonemeData[i].checkbox.value) {
-        for (var j = 0; j < phonemeData[i].data.times.length; j++) {
-          selectedPhonemes.push({
-            startTime: phonemeData[i].data.times[j].start,
-            endTime: phonemeData[i].data.times[j].end,
-            phoneme: phonemeData[i].phoneme,
-          });
-        }
+      if (!phonemeData[i].checkbox.value) continue;
+
+      for (var j = 0; j < phonemeData[i].data.times.length; j++) {
+        selectedPhonemes.push({
+          startTime: phonemeData[i].data.times[j].start,
+          endTime: phonemeData[i].data.times[j].end,
+          phoneme: phonemeData[i].phoneme,
+        });
       }
     }
 
