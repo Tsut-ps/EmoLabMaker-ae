@@ -1,6 +1,6 @@
 # EmoLabMaker-ae
 
-<img width="1200" height="599" alt="image" src="https://github.com/user-attachments/assets/8111e6be-d43f-41ec-9d73-b652b925ff83" />
+<img width="1200" height="800" alt="image" src="https://github.com/user-attachments/assets/eab99128-995c-44ff-8da9-c870d6649527" />
 
 `EmoLabMaker` は、After Effects 上で
 
