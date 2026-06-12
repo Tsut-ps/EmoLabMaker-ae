@@ -1,9 +1,10 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.2.3
+ * @version 1.3.0
  * @description レイヤー選択 + 口パク 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
+ *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
  */
 
 (function emoLabMaker(thisObj) {
@@ -11,6 +12,7 @@
   // 共通定数
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
+  var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -149,9 +151,12 @@
   // エクスプレッション
   // ══════════════════════════════════════════════════════════════════
 
-  function buildOpacityExpression(ctrlCompName, targetCompName) {
+  /**
+   * 表情マーカーのロジック部分（制御レイヤー探索 + 現在マーカー名取得）。
+   * emo 単独式と、口パク/目パチの合成式で共有する。
+   */
+  function buildEmoMarkerSnippet(ctrlCompName, targetCompName) {
     return [
-      "// " + EXPR_SIGNATURE,
       'var ctrlComp = comp("' + ctrlCompName + '");',
       'var ctrlName = "' + getCtrlLayerName(targetCompName) + '";',
       "function findCtrlLayer() {",
@@ -173,10 +178,18 @@
       "  if (index < 1) return null;",
       "  return marker.key(index).comment;",
       "}",
-      "var ctrlLayer = findCtrlLayer();",
-      "var markerName = getCurrentMarkerName(ctrlLayer);",
-      "markerName !== null && thisLayer.name === markerName ? 100 : 0;",
-    ].join("\n");
+    ];
+  }
+
+  function buildOpacityExpression(ctrlCompName, targetCompName) {
+    return ["// " + EXPR_SIGNATURE]
+      .concat(buildEmoMarkerSnippet(ctrlCompName, targetCompName))
+      .concat([
+        "var ctrlLayer = findCtrlLayer();",
+        "var markerName = getCurrentMarkerName(ctrlLayer);",
+        "markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+      ])
+      .join("\n");
   }
 
   function isRegistered(layer) {
@@ -188,21 +201,44 @@
     }
   }
 
+  /**
+   * 登録済みレイヤーのエクスプレッションから emo の制御情報を読み取る。
+   * 合成式（口パク/目パチ）適用時に表情切替の登録を引き継ぐために使う。
+   */
+  function parseEmoContext(layer) {
+    var expr = "";
+    try {
+      expr = layer.transform.opacity.expression;
+    } catch (e) {
+      return null;
+    }
+    if (!expr || expr.indexOf(EXPR_SIGNATURE) < 0) return null;
+
+    var compMatch = expr.match(/var ctrlComp = comp\("([\s\S]*?)"\);/);
+    var nameMatch = expr.match(/var ctrlName = "([\s\S]*?)";/);
+    if (!compMatch || !nameMatch) return null;
+    if (nameMatch[1].indexOf(CTRL_PREFIX) !== 0) return null;
+
+    return {
+      ctrlCompName: compMatch[1],
+      targetCompName: nameMatch[1].substring(CTRL_PREFIX.length),
+    };
+  }
+
   // ══════════════════════════════════════════════════════════════════
   // 登録 / 解除
   // ══════════════════════════════════════════════════════════════════
 
-  function registerSelectedLayers(targetComp, ctrlCompName) {
-    var selected = targetComp.selectedLayers;
-    if (!selected || selected.length === 0) return 0;
+  function registerLayers(targetComp, ctrlCompName, layers, undoName) {
+    if (!layers || layers.length === 0) return 0;
 
     var expression = buildOpacityExpression(ctrlCompName, targetComp.name);
     var count = 0;
 
-    app.beginUndoGroup("emo2layer: Register");
+    app.beginUndoGroup(undoName || "emo2layer: Register");
     try {
-      for (var i = 0; i < selected.length; i++) {
-        var layer = selected[i];
+      for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
         if (!layer) continue;
         layer.transform.opacity.expression = expression;
         layer.enabled = true;
@@ -212,6 +248,10 @@
       app.endUndoGroup();
     }
     return count;
+  }
+
+  function registerSelectedLayers(targetComp, ctrlCompName) {
+    return registerLayers(targetComp, ctrlCompName, targetComp.selectedLayers);
   }
 
   function unregisterSelectedLayers(targetComp) {
@@ -230,6 +270,30 @@
       }
     } finally {
       app.endUndoGroup();
+    }
+    return count;
+  }
+
+  /**
+   * 指定シグネチャを含むエクスプレッションを除去して不透明度を 100 に戻す。
+   * undo group は呼び出し側で管理する。
+   */
+  function removeExpressionBySignature(layers, signature) {
+    var count = 0;
+    if (!layers) return 0;
+    for (var i = 0; i < layers.length; i++) {
+      var layer = layers[i];
+      if (!layer) continue;
+      var expr = "";
+      try {
+        expr = layer.transform.opacity.expression;
+      } catch (e) {
+        continue;
+      }
+      if (!expr || expr.indexOf(signature) < 0) continue;
+      layer.transform.opacity.expression = "";
+      layer.transform.opacity.setValue(100);
+      count++;
     }
     return count;
   }
@@ -290,24 +354,29 @@
     } catch (e) {}
   }
 
-  function writeMarkerName(targetComp, ctrlComp, markerName) {
-    var ctrlLayer = findCtrlLayerInComp(
-      ctrlComp,
-      targetComp.name,
-      targetComp.time,
-    );
+  function writeMarkerNameAtTime(ctrlComp, targetCompName, time, markerName) {
+    var ctrlLayer = findCtrlLayerInComp(ctrlComp, targetCompName, time);
     if (!ctrlLayer) return false;
 
     app.beginUndoGroup("emo2layer: Write Marker");
     try {
-      removeMarkerAtTime(ctrlLayer, targetComp.time);
+      removeMarkerAtTime(ctrlLayer, time);
       ctrlLayer
         .property("Marker")
-        .setValueAtTime(targetComp.time, new MarkerValue(markerName));
+        .setValueAtTime(time, new MarkerValue(markerName));
     } finally {
       app.endUndoGroup();
     }
     return true;
+  }
+
+  function writeMarkerName(targetComp, ctrlComp, markerName) {
+    return writeMarkerNameAtTime(
+      ctrlComp,
+      targetComp.name,
+      targetComp.time,
+      markerName,
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -941,6 +1010,155 @@
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // 口パク エクスプレッション
+  // ══════════════════════════════════════════════════════════════════
+
+  /**
+   * 音素レイヤー探索 + 現在音素取得のロジック部分。
+   * 名前マッチ式（従来）とマッピング式で共有する。
+   */
+  function buildPhonemeSnippet(targetCompName) {
+    return [
+      'var targetComp = comp("' + targetCompName + '");',
+      "",
+      "function findPhonemeLayer() {",
+      "  for (var i = 1; i <= targetComp.numLayers; i++) {",
+      "    var layer = targetComp.layer(i);",
+      '    if (layer.name.indexOf("[Lab] ") !== 0) continue;',
+      "    if (layer.marker.numKeys === 0) continue;",
+      "    if (time < layer.inPoint || time >= layer.outPoint) continue;",
+      "    return layer;",
+      "  }",
+      "  return null;",
+      "}",
+      "",
+      "function getPhoneme(phonemeLayer) {",
+      "  if (!phonemeLayer) return null;",
+      "  var marker = phonemeLayer.marker;",
+      "  var index = marker.nearestKey(time).index;",
+      "  if (marker.key(index).time > time) index--;",
+      "  if (index < 1) return null;",
+      "  return marker.key(index).comment;",
+      "}",
+    ];
+  }
+
+  /** 従来の名前マッチ式（レイヤー名 = 音素名で表示判定） */
+  function buildLabNameMatchExpression(targetCompName) {
+    return buildPhonemeSnippet(targetCompName)
+      .concat([
+        "",
+        "function matchesName(name) {",
+        '  return (","+thisLayer.name+",").indexOf(","+name+",") >= 0;',
+        "}",
+        "",
+        "var phonemeLayer = findPhonemeLayer();",
+        "var phoneme = getPhoneme(phonemeLayer);",
+        'phoneme !== null ? (matchesName(phoneme) ? 100 : 0) : (matchesName("def") ? 100 : 0);',
+      ])
+      .join("\n");
+  }
+
+  /**
+   * マッピング式。レイヤー名は変えず、割り当てた音素リストを式に埋め込む。
+   *   - 発話中（現在音素あり）: myPhonemes に一致したら表示。
+   *     閉じ口（isClosedFallback）はどの口形にも属さない音素（=子音など）でも表示
+   *   - 非発話中: emoCtx があれば表情マーカーのロジックに従い、
+   *     なければ閉じ口のみ表示
+   */
+  function buildLabMappedExpression(
+    phonemeCompName,
+    myCsv,
+    allCsv,
+    isClosedFallback,
+    emoCtx,
+  ) {
+    var lines = ["// " + LAB_MAP_SIGNATURE];
+    if (emoCtx) lines.push("// " + EXPR_SIGNATURE);
+
+    lines = lines
+      .concat([
+        'var myPhonemes = ",' + myCsv + ',";',
+        'var allPhonemes = ",' + allCsv + ',";',
+        "var isClosedFallback = " + (isClosedFallback ? "true" : "false") + ";",
+      ])
+      .concat(buildPhonemeSnippet(phonemeCompName))
+      .concat([
+        "",
+        "var phonemeLayer = findPhonemeLayer();",
+        "var phoneme = getPhoneme(phonemeLayer);",
+        "var speaking = phoneme !== null;",
+        "var shown = false;",
+        'if (speaking && myPhonemes.indexOf("," + phoneme + ",") >= 0) shown = true;',
+        'if (speaking && isClosedFallback && allPhonemes.indexOf("," + phoneme + ",") < 0) shown = true;',
+      ]);
+
+    if (emoCtx) {
+      lines = lines
+        .concat(
+          buildEmoMarkerSnippet(emoCtx.ctrlCompName, emoCtx.targetCompName),
+        )
+        .concat([
+          "var result;",
+          "if (speaking) {",
+          "  result = shown ? 100 : 0;",
+          "} else {",
+          "  var ctrlLayer = findCtrlLayer();",
+          "  var markerName = getCurrentMarkerName(ctrlLayer);",
+          "  result = markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+          "}",
+          "result;",
+        ]);
+    } else {
+      lines.push("speaking ? (shown ? 100 : 0) : (isClosedFallback ? 100 : 0);");
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * 音素レイヤー（[Lab]）のあるコンポを選ばせるダイアログ。
+   * 確定したらコンポ名、キャンセルなら null を返す。
+   */
+  function promptForPhonemeComp(defaultName) {
+    var compNames = [];
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var item = app.project.item(i);
+      if (item instanceof CompItem) {
+        compNames.push(item.name);
+      }
+    }
+
+    var dialog = new Window("dialog", "コンポジションを選択");
+    dialog.orientation = "column";
+    dialog.alignChildren = ["fill", "top"];
+
+    dialog.add("statictext", undefined, "制御レイヤーのある場所:");
+    var compDropdown = dialog.add("dropdownlist", undefined, compNames);
+
+    for (var j = 0; j < compNames.length; j++) {
+      if (compNames[j] === defaultName) {
+        compDropdown.selection = j;
+        break;
+      }
+    }
+    if (!compDropdown.selection && compNames.length > 0) {
+      compDropdown.selection = 0;
+    }
+
+    var dialogBtnGroup = dialog.add("group");
+    dialogBtnGroup.add("button", undefined, "OK", { name: "ok" });
+    dialogBtnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
+
+    if (dialog.show() !== 1) return null;
+    if (!compDropdown.selection) {
+      alert("コンポジションを選択してください");
+      return null;
+    }
+    return compDropdown.selection.text;
+  }
+
   // ========== 一括選択ボタングループ ==========
   var phonemeSelectorGroup = phonemeListPanel.add("group");
   phonemeSelectorGroup.orientation = "row";
@@ -987,6 +1205,322 @@
   framePlus.preferredSize = [35, 25];
   framePlus.alignment = ["right", "center"];
   framePlus.helpTip = "1フレーム進める";
+
+  // ========== 口形状マッピング (PSDToolKit互換) ==========
+  // あ/い/う/え/お/ん の口形レイヤーに音素グループを割り当てる。
+  // レイヤー名は変えずにエクスプレッションへ焼き込む方式
+
+  var MOUTH_SHAPES = [
+    { label: "あ", preset: "a" },
+    { label: "い", preset: "i" },
+    { label: "う", preset: "u,w" },
+    { label: "え", preset: "e" },
+    { label: "お", preset: "o" },
+    { label: "ん(閉)", preset: "N,cl,Q,pau,sil,br", closedFallback: true },
+  ];
+
+  // 自動割当のヒューリスティック（先勝ち）。「閉」を「ん」より先に判定する
+  var MOUTH_AUTO_RULES = [
+    { ch: "閉", shapeIndex: 5 },
+    { ch: "ん", shapeIndex: 5 },
+    { ch: "あ", shapeIndex: 0 },
+    { ch: "い", shapeIndex: 1 },
+    { ch: "う", shapeIndex: 2 },
+    { ch: "え", shapeIndex: 3 },
+    { ch: "お", shapeIndex: 4 },
+  ];
+
+  function normalizeCsvTokens(text) {
+    var parts = String(text || "").split(/[,、\s]+/);
+    var tokens = [];
+    var seen = {};
+    for (var i = 0; i < parts.length; i++) {
+      var token = parts[i].replace(/^\s+|\s+$/g, "");
+      if (token.length === 0 || seen[token]) continue;
+      seen[token] = true;
+      tokens.push(token);
+    }
+    return tokens;
+  }
+
+  /** 削除済みレイヤーを除外しつつ名前一覧を返す */
+  function describeAssignedLayers(layers) {
+    var names = [];
+    for (var i = layers.length - 1; i >= 0; i--) {
+      try {
+        names.unshift(layers[i].name);
+      } catch (e) {
+        layers.splice(i, 1); // 削除済みレイヤーを掃除
+      }
+    }
+    return names.length > 0 ? names.join(", ") : "（未割当）";
+  }
+
+  var mouthMapPanel = tabLab.add(
+    "panel",
+    undefined,
+    "口形状マッピング (PSDToolKit互換)",
+  );
+  mouthMapPanel.orientation = "column";
+  mouthMapPanel.alignChildren = ["fill", "top"];
+  mouthMapPanel.alignment = ["fill", "top"];
+  mouthMapPanel.spacing = 4;
+  mouthMapPanel.margins = 10;
+
+  var mouthMapHint = mouthMapPanel.add(
+    "statictext",
+    undefined,
+    "口コンポでレイヤーを選択して各行の「割当」→「適用」",
+  );
+  mouthMapHint.alignment = ["fill", "top"];
+
+  var mouthRows = [];
+  for (var msIdx = 0; msIdx < MOUTH_SHAPES.length; msIdx++) {
+    (function (shape) {
+      var row = mouthMapPanel.add("group");
+      row.orientation = "row";
+      row.alignment = ["fill", "top"];
+      row.alignChildren = ["left", "center"];
+      row.spacing = 4;
+
+      var lbl = row.add("statictext", undefined, shape.label);
+      lbl.preferredSize = [44, BUTTON_HEIGHT];
+
+      var csvInput = row.add("edittext", undefined, shape.preset);
+      csvInput.preferredSize = [104, BUTTON_HEIGHT];
+      csvInput.helpTip = "この口形で表示する音素（カンマ区切り）";
+
+      var assignBtn = row.add("button", undefined, "割当");
+      assignBtn.preferredSize = [48, BUTTON_HEIGHT];
+      assignBtn.helpTip = "アクティブコンポの選択レイヤーをこの口形に割当";
+
+      var clearBtn = row.add("button", undefined, "×");
+      clearBtn.preferredSize = [24, BUTTON_HEIGHT];
+      clearBtn.helpTip = "この口形の割当をクリア";
+
+      var namesText = row.add("statictext", undefined, "（未割当）");
+      namesText.alignment = ["fill", "center"];
+
+      var rowData = {
+        shape: shape,
+        csvInput: csvInput,
+        namesText: namesText,
+        layers: [],
+      };
+      mouthRows.push(rowData);
+
+      assignBtn.onClick = function () {
+        var comp = getActiveComp();
+        if (!comp || comp.selectedLayers.length === 0) {
+          alert("口形レイヤーを選択してください");
+          return;
+        }
+        rowData.layers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+          rowData.layers.push(comp.selectedLayers[i]);
+        }
+        namesText.text = describeAssignedLayers(rowData.layers);
+        namesText.helpTip = namesText.text;
+      };
+
+      clearBtn.onClick = function () {
+        rowData.layers = [];
+        namesText.text = "（未割当）";
+        namesText.helpTip = "";
+      };
+    })(MOUTH_SHAPES[msIdx]);
+  }
+
+  var mouthMapBtnRow = mouthMapPanel.add("group");
+  mouthMapBtnRow.orientation = "row";
+  mouthMapBtnRow.alignment = ["fill", "top"];
+  mouthMapBtnRow.alignChildren = ["fill", "center"];
+  mouthMapBtnRow.spacing = 5;
+
+  var mouthAutoBtn = mouthMapBtnRow.add("button", undefined, "自動割当");
+  mouthAutoBtn.helpTip =
+    "選択レイヤー名に「あ/い/う/え/お/ん/閉」が含まれていれば自動で割当";
+  var mouthPresetBtn = mouthMapBtnRow.add("button", undefined, "プリセット");
+  mouthPresetBtn.helpTip = "音素リストを PSDToolKit 互換の初期値に戻す";
+  var mouthApplyBtn = mouthMapBtnRow.add("button", undefined, "適用");
+  mouthApplyBtn.helpTip =
+    "割当済みレイヤーに不透明度エクスプレッションを設定（表情登録済みなら共存）";
+  var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
+  mouthRemoveBtn.helpTip =
+    "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
+
+  mouthAutoBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp || comp.selectedLayers.length === 0) {
+      alert("口形レイヤーを選択してください");
+      return;
+    }
+
+    var assignedCount = 0;
+    for (var r = 0; r < mouthRows.length; r++) {
+      mouthRows[r].layers = [];
+    }
+
+    for (var i = 0; i < comp.selectedLayers.length; i++) {
+      var layer = comp.selectedLayers[i];
+      for (var j = 0; j < MOUTH_AUTO_RULES.length; j++) {
+        if (layer.name.indexOf(MOUTH_AUTO_RULES[j].ch) < 0) continue;
+        mouthRows[MOUTH_AUTO_RULES[j].shapeIndex].layers.push(layer);
+        assignedCount++;
+        break;
+      }
+    }
+
+    for (var k = 0; k < mouthRows.length; k++) {
+      mouthRows[k].namesText.text = describeAssignedLayers(
+        mouthRows[k].layers,
+      );
+      mouthRows[k].namesText.helpTip = mouthRows[k].namesText.text;
+    }
+
+    if (assignedCount === 0) {
+      alert(
+        "割当できるレイヤーがありませんでした。\nレイヤー名に あ/い/う/え/お/ん/閉 が含まれている必要があります。",
+      );
+    }
+  };
+
+  mouthPresetBtn.onClick = function () {
+    for (var i = 0; i < mouthRows.length; i++) {
+      mouthRows[i].csvInput.text = mouthRows[i].shape.preset;
+    }
+  };
+
+  mouthApplyBtn.onClick = function () {
+    // 全口形の音素を集約（閉じ口の「未割当音素→閉じ」判定に使用）
+    var allTokens = [];
+    var allSeen = {};
+    var hasAssignment = false;
+
+    for (var r = 0; r < mouthRows.length; r++) {
+      var rowData = mouthRows[r];
+      rowData.tokens = normalizeCsvTokens(rowData.csvInput.text);
+      if (rowData.layers.length > 0) hasAssignment = true;
+      for (var t = 0; t < rowData.tokens.length; t++) {
+        if (allSeen[rowData.tokens[t]]) continue;
+        allSeen[rowData.tokens[t]] = true;
+        allTokens.push(rowData.tokens[t]);
+      }
+    }
+
+    if (!hasAssignment) {
+      alert(
+        "口形レイヤーが割り当てられていません。\n各行の「割当」または「自動割当」で設定してください。",
+      );
+      return;
+    }
+
+    var activeComp = getActiveComp();
+    var phonemeCompName = promptForPhonemeComp(
+      activeComp ? activeComp.name : null,
+    );
+    if (!phonemeCompName) return;
+
+    var allCsv = allTokens.join(",");
+    var appliedCount = 0;
+    var emoLinkedCount = 0;
+    var staleCount = 0;
+
+    app.beginUndoGroup("lab2layer: 口形状マッピング適用");
+    try {
+      for (var i = 0; i < mouthRows.length; i++) {
+        var row = mouthRows[i];
+        var myCsv = row.tokens.join(",");
+        var isClosedFallback = !!row.shape.closedFallback;
+
+        for (var j = 0; j < row.layers.length; j++) {
+          var layer = row.layers[j];
+          var emoCtx = null;
+          try {
+            emoCtx = parseEmoContext(layer);
+            layer.transform.opacity.expression = buildLabMappedExpression(
+              phonemeCompName,
+              myCsv,
+              allCsv,
+              isClosedFallback,
+              emoCtx,
+            );
+            layer.enabled = true;
+          } catch (e) {
+            staleCount++;
+            continue;
+          }
+          appliedCount++;
+          if (emoCtx) emoLinkedCount++;
+        }
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+
+    var message =
+      "完了: " +
+      appliedCount +
+      " レイヤーにマッピングを設定しました。\n音素ソース: " +
+      phonemeCompName;
+    if (emoLinkedCount > 0) {
+      message +=
+        "\n表情切替と共存: " + emoLinkedCount + " レイヤー（非発話中は表情に従います）";
+    }
+    if (staleCount > 0) {
+      message +=
+        "\n割当後に削除されたレイヤー: " + staleCount + "（スキップしました）";
+    }
+    alert(message);
+  };
+
+  mouthRemoveBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp || comp.selectedLayers.length === 0) {
+      alert("解除するレイヤーを選択してください");
+      return;
+    }
+
+    var removedCount = 0;
+    var restoredCount = 0;
+
+    app.beginUndoGroup("lab2layer: 口形状マッピング解除");
+    try {
+      var layers = comp.selectedLayers;
+      for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        var expr = "";
+        try {
+          expr = layer.transform.opacity.expression;
+        } catch (e) {
+          continue;
+        }
+        if (!expr || expr.indexOf(LAB_MAP_SIGNATURE) < 0) continue;
+
+        var emoCtx = parseEmoContext(layer);
+        if (emoCtx) {
+          // 表情切替の登録に戻す
+          layer.transform.opacity.expression = buildOpacityExpression(
+            emoCtx.ctrlCompName,
+            emoCtx.targetCompName,
+          );
+          restoredCount++;
+        } else {
+          layer.transform.opacity.expression = "";
+          layer.transform.opacity.setValue(100);
+        }
+        removedCount++;
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+
+    var message = removedCount + " レイヤーのマッピングを解除しました。";
+    if (restoredCount > 0) {
+      message += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
+    }
+    alert(message);
+  };
 
   // ========== 実行ボタン ==========
   var executeGroup = tabLab.add("group");
@@ -1286,84 +1820,15 @@
       return;
     }
 
-    // プロジェクト内のコンポジション一覧を取得
-    var compNames = [];
-    for (var i = 1; i <= app.project.numItems; i++) {
-      var item = app.project.item(i);
-      if (item instanceof CompItem) {
-        compNames.push(item.name);
-      }
-    }
-
-    // コンポジション選択ダイアログ
-    var dialog = new Window("dialog", "コンポジションを選択");
-    dialog.orientation = "column";
-    dialog.alignChildren = ["fill", "top"];
-
-    dialog.add("statictext", undefined, "制御レイヤーのある場所:");
-    var compDropdown = dialog.add("dropdownlist", undefined, compNames);
-
-    // 現在のコンポジションをデフォルト選択
-    for (var i = 0; i < compNames.length; i++) {
-      if (compNames[i] === comp.name) {
-        compDropdown.selection = i;
-        break;
-      }
-    }
-    if (!compDropdown.selection && compNames.length > 0) {
-      compDropdown.selection = 0;
-    }
-
-    var dialogBtnGroup = dialog.add("group");
-    dialogBtnGroup.add("button", undefined, "OK", { name: "ok" });
-    dialogBtnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
-
-    if (dialog.show() !== 1) return;
-    if (!compDropdown.selection) {
-      alert("コンポジションを選択してください");
-      return;
-    }
-
-    var targetCompName = compDropdown.selection.text;
+    var targetCompName = promptForPhonemeComp(comp.name);
+    if (!targetCompName) return;
 
     app.beginUndoGroup("lab2layer: Setup Phoneme Opacity");
 
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i];
 
-      var exprLines = [
-        'var targetComp = comp("' + targetCompName + '");',
-        "",
-        "function findPhonemeLayer() {",
-        "  for (var i = 1; i <= targetComp.numLayers; i++) {",
-        "    var layer = targetComp.layer(i);",
-        '    if (layer.name.indexOf("[Lab] ") !== 0) continue;',
-        "    if (layer.marker.numKeys === 0) continue;",
-        "    if (time < layer.inPoint || time >= layer.outPoint) continue;",
-        "    return layer;",
-        "  }",
-        "  return null;",
-        "}",
-        "",
-        "function getPhoneme(phonemeLayer) {",
-        "  if (!phonemeLayer) return null;",
-        "  var marker = phonemeLayer.marker;",
-        "  var index = marker.nearestKey(time).index;",
-        "  if (marker.key(index).time > time) index--;",
-        "  if (index < 1) return null;",
-        "  return marker.key(index).comment;",
-        "}",
-        "",
-        "function matchesName(name) {",
-        '  return (","+thisLayer.name+",").indexOf(","+name+",") >= 0;',
-        "}",
-        "",
-        "var phonemeLayer = findPhonemeLayer();",
-        "var phoneme = getPhoneme(phonemeLayer);",
-        'phoneme !== null ? (matchesName(phoneme) ? 100 : 0) : (matchesName("def") ? 100 : 0);',
-      ];
-
-      var expr = exprLines.join("\n");
+      var expr = buildLabNameMatchExpression(targetCompName);
       layer
         .property("ADBE Transform Group")
         .property("ADBE Opacity").expression = expr;
