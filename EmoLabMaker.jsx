@@ -746,6 +746,11 @@
       "",
       "【ドロップダウン更新】",
       "タイトル行の ↺ ボタンで対象・制御コンポ一覧を一括再取得します。",
+      "",
+      "【PSDToolKit 互換】",
+      "PSD タブ: 立ち絵 PSD (* = 排他 / ! = 強制表示) から表情切替を",
+      "自動セットアップ。目パチ (自動まばたき) もここで設定できます。",
+      "口パクタブ: 口形状マッピングで あ/い/う/え/お/ん に音素を割当できます。",
     ];
     for (var i = 0; i < lines.length; i++) {
       dlg.add("statictext", undefined, lines[i]);
@@ -2217,8 +2222,8 @@
           : "") +
         "）";
       var cb = listGroup.add("checkbox", undefined, label);
+      // 排他レイヤーのあるグループのみ既定で ON（強制表示のみのグループも選択は可能）
       cb.value = group.exclusiveLayers.length > 0;
-      cb.enabled = group.exclusiveLayers.length > 0;
       checkboxes.push(cb);
     }
 
