@@ -1,0 +1,107 @@
+# PSDToolKit 互換化 計画
+
+EmoLabMaker を PSDToolKit(oov 氏 / AviUtl 用)向けに作られた立ち絵 PSD と
+そのワークフローに対応させるための調査結果と実装計画。
+
+## 背景と目的
+
+ニコニコ動画等で配布される立ち絵 PSD の多くは PSDToolKit の規約で作られている。
+これを After Effects + EmoLabMaker でそのまま活用できるようにする。
+
+### PSDToolKit の仕様(調査結果)
+
+- **レイヤー命名規則**
+  - `*` prefix: 兄弟レイヤー間で排他表示(ラジオボタン)
+  - `!` prefix: 強制表示(常に表示、非表示にできない)
+  - `:flipx` / `:flipy` suffix: 左右/上下反転バリエーション
+- **口パク あいうえお@PSD**: lab ファイルの母音タイミングで あ/い/う/え/お/ん の6口形状を切替。子音は基本「ん(閉じ)」扱い
+- **目パチ@PSD**: 間隔・速度パラメータで自動まばたき
+
+参考: [PSDTool マニュアル](https://oov.github.io/psdtool/manual.html) /
+[PSD アニメーション効果](https://oov.github.io/aviutl_psdtoolkit/psd.html) /
+[準備オブジェクト](https://oov.github.io/aviutl_psdtoolkit/prep.html)
+
+### 実装形態の判断: 単一 .jsx を継続
+
+「スクリプトに留めるべきか」を調査した結論:
+
+- CEP は CEP 12(AE 25.0 同梱)が最後のメジャーバージョンで、以後はセキュリティ修正のみ
+- UXP の After Effects 対応は未リリース(時期未定)
+- AE は PSD をネイティブインポートできる(レイヤー名・グループ構造・表示状態を保持)ため、
+  CEP + Node.js による PSD バイナリ解析は不要
+- 単一ファイル配布の手軽さは動画制作者というユーザー層に合っている
+
+→ **今パネル(CEP)化する利点は薄い。単一 .jsx のまま続行し、UXP の AE 対応がリリースされたら再検討する。**
+
+## 実現する機能
+
+1. **PSD 素材互換**: PSDToolKit 向け立ち絵 PSD を取り込み、`*`/`!` 命名規則を解釈して表情切替を自動セットアップ
+2. **目パチ**: 自動まばたきエクスプレッション生成
+3. **口パク改善**: 音素→あいうえお口形状の割り当てを UI で行えるようにし、レイヤーごとの手動リネームを不要にする。口パクは表情と独立したレイヤー群で、表情の口を上書きする形
+
+## 主要な設計判断
+
+| 論点 | 判断 |
+|---|---|
+| UI 構成 | タブ3「PSD取込」を新設(PSD インポート + 自動セットアップ + 目パチ)。口形マッピングはタブ2「口パク」内に新パネル追加 |
+| 音素→口形状 | **エクスプレッション埋め込み方式**(`var myPhonemes = ",a,e,";` を焼き込み)。レイヤーをリネームしないので PSD 由来の可読名と emo2layer 登録を保全。閉じ口は「どの母音リストにも属さない音素(=子音) or 音素なし」のフォールバックで表示し、子音の列挙が不要 |
+| `:flipx` 等 | v1 ではスキップ + 結果レポートに警告のみ(AE では Scale 反転で代替可能) |
+| 後方互換 | 既存の `[Emo]`/`[Lab]`/`[P]` データ・既存エクスプレッションは一切変更しない。すべて y バンプ(機能追加)で収める |
+| シグネチャ | 既存 `emo2layerCtrlMarker` を PSD 自動登録でも再利用(レイヤー選択タブのグリッド UI がそのまま使える)。新設: `emoBlinkAuto`(目パチ)、`lab2layerPhonemeMap`(口形マッピング) |
+
+## 実装ステップ
+
+対象: `EmoLabMaker.jsx`(全実装)、`README.md`(ドキュメント)
+
+### Step 1: 共通基盤(リファクタ、挙動不変)
+
+- `registerSelectedLayers` から汎用版 `registerLayers(targetComp, ctrlCompName, layers, undoName)` を抽出し、既存関数は薄いラッパー化(自動セットアップが選択状態に依存せず登録できるように)
+- `writeMarkerName` から `writeMarkerNameAtTime(ctrlComp, targetCompName, time, name)` を抽出(時刻 0 にデフォルト表情マーカーを書くため)
+- `unregisterSelectedLayers` のパターンを一般化した `removeExpressionBySignature(layers, signature)` を追加
+- 定数追加: `BLINK_SIGNATURE`, `LAB_MAP_SIGNATURE`
+
+### Step 2: PSD 命名規則パーサと構造走査
+
+- `parsePsdLayerName(name)` → `{ base, exclusive(*), forced(!), flipx, flipy }`(`*!` 複合は順不同で剥がす)
+- `scanPsdCompTree(rootComp)`: AE の PSD インポート(COMP)では PSD グループ=ネストコンポになるため、コンポごとに `{ exclusiveLayers, forcedLayers, flipSkipped, defaultLayer }` を再帰収集。`defaultLayer` は exclusive のうち `layer.enabled === true` のもの(PSD の表示状態を継承)、なければ先頭
+- 同一コンポ内の重複レイヤー名は ` (2)` 付与でリネーム(`dedupeLayerNames`)。`*` prefix は登録前に剥がしてリネーム(マーカー名・グリッドボタンに `*` を残さない)
+
+### Step 3: PSD インポート〜自動セットアップ(タブ3)
+
+- `importPsd(file)`: `ImportOptions` + `ImportAsType.COMP`(ドキュメントサイズ維持)。`canImportAs` で事前検証、同名コンポは確認ダイアログ
+- `autoSetupPsd(rootComp, ctrlComp)`: グループごとに dedupe → `createCtrlLayer`(再利用)→ `registerLayers` → `!` レイヤーは `enabled = true` のみ(未登録)→ **時刻 0 にデフォルト表情マーカーを書き込み**(既存エクスプレッションはマーカーなし時 opacity 0 のため、これがないと立ち絵が全消えする)→ flip はスキップ記録。全体を 1 つの undo group に
+- 完了後レポート(グループ数 / 登録数 / リネーム一覧 / flip スキップ一覧)。レイヤー選択タブの一覧を再構築し、即使える状態にする
+
+### Step 4: 目パチ(タブ3内パネル)
+
+- `buildBlinkExpression(params, role)`: マーカー不要の time ベース。パラメータ: 平均間隔(既定 4.0 秒)/ 閉じ速度 / 閉じ維持 / ランダム率。`seedRandom(サイクル番号, true)` で決定論化し、開き/中間/閉じの全レイヤーが同一スケジュールを共有(レイヤー間同期)。自分の role("open"/"mid"/"closed")のフェーズなら 100、それ以外 0。中間レイヤー未指定時は mid 区間を closed に畳む
+- emo 登録済みレイヤーとは排他(同じ opacity を奪い合うため、`isRegistered` で検査し警告して除外)。[Emo] マーカー連動(表情中は瞬き停止)は後回し
+- UI: 開き / 中間(任意)/ 閉じ目の割当ボタン + 間隔・速度・ランダム% 入力 + 「目パチ設定」「解除」
+
+### Step 5: 音素→口形状マッピング(タブ2拡張)
+
+- 既存のインラインエクスプレッションを `buildLabNameMatchExpression()` に抽出(挙動不変)
+- 新規 `buildLabMappedExpression(targetCompName, phonemeCsv, isClosedFallback)`: レイヤー名マッチの代わりに埋め込み定数と照合。閉じ口には全シェイプ統合 CSV も埋め込み「未割当音素 → 閉じ」を実現
+- プリセット(PSDToolKit 互換): `あ: a / い: i / う: u,w / え: e / お: o / ん(閉じ): N,cl,Q,pau,sil,br + 未割当フォールバック`。永続化はしない(エクスプレッションに焼き込み、再適用で更新)
+- UI: 6行(あ/い/う/え/お/ん)× { 音素 CSV 入力 + 選択レイヤー割当ボタン + 割当表示 } + 「自動割当」(レイヤー名に あ/い/う/え/お/ん/閉 を含めばヒューリスティック割当)+ 「マッピング適用」
+- 既存の名前マッチ版「口パク設定」はそのまま残す(後方互換)
+
+### Step 6: 仕上げ
+
+- ヘルプダイアログとタブ3説明、README に新タブの使い方・PSDToolKit 命名規則対応表(`*`=排他→自動登録 / `!`=強制表示 / `:flipx`=v1 未対応)・バージョン履歴を追記。ヘッダの `@version` 更新
+
+## リリース計画(すべて y バンプ)
+
+| バージョン | 内容 |
+|---|---|
+| v1.3.0 | Step 1 + Step 5(口形マッピング)。PSD 取込なしでも単体価値があり、リスク最小 |
+| v1.4.0 | Step 2 + Step 3(PSD インポート & 自動セットアップ) |
+| v1.5.0 | Step 4(目パチ) |
+| v1.6+(後回し) | `:flipx/:flipy` の Scale 反転自動生成、目パチの [Emo] マーカー連動、中間目コマ複数枚、マッピング永続化、PSDTool お気に入り(.pfv)読み込み |
+
+## 検証方法
+
+1. エクスプレッション生成関数の出力を目視・構文検証(ExtendScript は ES3 準拠 — `const`/`let`/アロー関数は不可)
+2. `parsePsdLayerName` / lab パース等の純粋ロジックは簡易テストで検証
+3. AE 実機で一連フローを確認: PSDToolKit 向け配布立ち絵 PSD を取込 → 表情グリッドから切替 → lab 読込 → 口形マッピング適用 → 目パチ設定
+4. 後方互換: 既存プロジェクトの [Emo]/[P] レイヤーが新版パネルで認識・操作できること
