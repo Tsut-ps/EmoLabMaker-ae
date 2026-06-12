@@ -1,10 +1,11 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.3.0
- * @description レイヤー選択 + 口パク 統合パネル
+ * @version 1.4.0
+ * @description レイヤー選択 + 口パク + PSDセットアップ 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
  *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
+ *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / :flipx) の立ち絵 PSD から表情切替を自動セットアップ
  */
 
 (function emoLabMaker(thisObj) {
@@ -61,6 +62,7 @@
 
   var tabSelector = tabs.add("tab", undefined, "レイヤー選択");
   var tabLab = tabs.add("tab", undefined, "口パク");
+  var tabPsd = tabs.add("tab", undefined, "PSD");
 
   tabSelector.orientation = "column";
   tabSelector.alignChildren = ["fill", "top"];
@@ -71,6 +73,11 @@
   tabLab.alignChildren = ["fill", "top"];
   tabLab.spacing = 8;
   tabLab.margins = 8;
+
+  tabPsd.orientation = "column";
+  tabPsd.alignChildren = ["fill", "top"];
+  tabPsd.spacing = 8;
+  tabPsd.margins = 8;
 
   tabs.selection = 0;
 
@@ -1896,6 +1903,552 @@
     }
   };
 
+  // ════════════════════════════════════════════════════════════════
+  //
+  //  TAB 3 : PSD セットアップ (PSDToolKit互換)
+  //
+  // ════════════════════════════════════════════════════════════════
+  // PSD の読み込み自体は AE 標準のインポートに任せる（バグ防止のため
+  // スクリプトからは importFile しない）。読み込み済みのコンポを走査し、
+  // PSDToolKit の命名規則 (* = 排他 / ! = 強制表示 / :flipx = 反転) を
+  // 解釈して表情切替をセットアップする。再実行しても壊れない（冪等）
+
+  /**
+   * PSDToolKit の命名規則を解釈する。
+   * prefix の * / ! は順不同・複合可（例: "*!笑い"）
+   */
+  function parsePsdLayerName(name) {
+    var base = String(name || "");
+    var exclusive = false;
+    var forced = false;
+    var flipx = false;
+    var flipy = false;
+
+    var stripping = true;
+    while (stripping && base.length > 0) {
+      var head = base.charAt(0);
+      if (head === "*") {
+        exclusive = true;
+        base = base.substring(1);
+      } else if (head === "!") {
+        forced = true;
+        base = base.substring(1);
+      } else {
+        stripping = false;
+      }
+    }
+
+    var flipMatch = base.match(/:(flipxy|flipx|flipy)$/);
+    if (flipMatch) {
+      if (flipMatch[1] === "flipx") flipx = true;
+      else if (flipMatch[1] === "flipy") flipy = true;
+      else {
+        flipx = true;
+        flipy = true;
+      }
+      base = base.substring(0, base.length - flipMatch[0].length);
+    }
+
+    return {
+      base: base,
+      exclusive: exclusive,
+      forced: forced,
+      flipx: flipx,
+      flipy: flipy,
+    };
+  }
+
+  /**
+   * PSD ルートコンポからネストコンポ（= PSD のグループ）を再帰走査し、
+   * 命名規則に該当するレイヤーをグループごとに収集する。
+   * 同じコンポが複数回参照されていても 1 回だけ処理する。
+   */
+  function scanPsdCompTree(rootComp) {
+    var groups = [];
+    var visited = {};
+
+    function scanComp(comp) {
+      if (visited[comp.id]) return;
+      visited[comp.id] = true;
+
+      var info = {
+        comp: comp,
+        exclusiveLayers: [],
+        forcedLayers: [],
+        flipSkipped: [],
+        defaultLayer: null,
+      };
+
+      for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        var parsed = parsePsdLayerName(layer.name);
+
+        if (parsed.flipx || parsed.flipy) {
+          // 反転バリエーションは v1 では未対応。表示状態はそのまま維持する
+          if (parsed.exclusive || parsed.forced) info.flipSkipped.push(layer);
+        } else if (parsed.exclusive) {
+          info.exclusiveLayers.push({ layer: layer, parsed: parsed });
+          if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
+        } else if (parsed.forced) {
+          info.forcedLayers.push(layer);
+        }
+
+        var source = null;
+        try {
+          source = layer.source;
+        } catch (e) {}
+        if (source && source instanceof CompItem) scanComp(source);
+      }
+
+      if (info.exclusiveLayers.length > 0 || info.forcedLayers.length > 0) {
+        groups.push(info);
+      }
+    }
+
+    scanComp(rootComp);
+    return groups;
+  }
+
+  /**
+   * グループコンポ名を「<ルートコンポ名>_<グループ名>」へ一意化する。
+   * エクスプレッションの comp("名前") はプロジェクト全体から名前で参照する
+   * ため、複数キャラの PSD で「目」「口」が衝突しないようにする。
+   * 前置済みなら何もしない（冪等）
+   */
+  function uniquifyGroupCompName(rootComp, groupComp) {
+    if (groupComp === rootComp || groupComp.id === rootComp.id) return null;
+    var prefix = rootComp.name + "_";
+    if (groupComp.name.indexOf(prefix) === 0) return null;
+    var oldName = groupComp.name;
+    groupComp.name = prefix + groupComp.name;
+    return oldName + " → " + groupComp.name;
+  }
+
+  /**
+   * 同一コンポ内の重複レイヤー名に「 (2)」「 (3)」を付けて一意化する。
+   * エクスプレッションもマーカーもレイヤー名一致で動くため、
+   * コンポ内の重複は誤マッチの原因になる
+   */
+  function dedupeLayerNames(comp) {
+    var renamed = [];
+    var seen = {};
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var layer = comp.layer(i);
+      var name = layer.name;
+      if (!seen[name]) {
+        seen[name] = 1;
+        continue;
+      }
+      var n = seen[name];
+      var candidate;
+      do {
+        n++;
+        candidate = name + " (" + n + ")";
+      } while (seen[candidate]);
+      seen[name] = n;
+      seen[candidate] = 1;
+      layer.name = candidate;
+      renamed.push(name + " → " + candidate);
+    }
+    return renamed;
+  }
+
+  function hasOpacitySignature(layer, signature) {
+    try {
+      return layer.transform.opacity.expression.indexOf(signature) >= 0;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * 走査結果に基づいてセットアップ / 更新を実行する。
+   * 冪等性ルール:
+   *   - リネーム（* 剥がし / 一意化）は適用済みなら何もしない
+   *   - 口パク等の合成式が設定済みのレイヤーは上書きせず保持
+   *   - 時刻 0 のデフォルト表情マーカーは、制御レイヤーにマーカーが
+   *     1 つもないときだけ書き込む（既存式はマーカーなし時 opacity 0 のため
+   *     初回は必須。ユーザーが打ったマーカーは上書きしない）
+   */
+  function autoSetupPsd(rootComp, ctrlComp, groups) {
+    var report = {
+      groupCount: 0,
+      registered: 0,
+      updated: 0,
+      kept: 0,
+      forced: 0,
+      markersWritten: 0,
+      renamedComps: [],
+      renamedLayers: [],
+      flipSkipped: [],
+    };
+
+    app.beginUndoGroup("EmoLabMaker: PSDセットアップ");
+    try {
+      for (var g = 0; g < groups.length; g++) {
+        var group = groups[g];
+        var comp = group.comp;
+
+        var compRename = uniquifyGroupCompName(rootComp, comp);
+        if (compRename) report.renamedComps.push(compRename);
+
+        // * prefix を剥がす（マーカー名・ボタン表示に * を残さない）
+        for (var e = 0; e < group.exclusiveLayers.length; e++) {
+          var entry = group.exclusiveLayers[e];
+          if (entry.layer.name !== entry.parsed.base) {
+            report.renamedLayers.push(
+              comp.name + ": " + entry.layer.name + " → " + entry.parsed.base,
+            );
+            entry.layer.name = entry.parsed.base;
+          }
+        }
+
+        var dedupeRenames = dedupeLayerNames(comp);
+        for (var d = 0; d < dedupeRenames.length; d++) {
+          report.renamedLayers.push(comp.name + ": " + dedupeRenames[d]);
+        }
+
+        // 強制表示 (!) レイヤー: 表示を保証するだけで登録しない
+        for (var f = 0; f < group.forcedLayers.length; f++) {
+          var forcedLayer = group.forcedLayers[f];
+          forcedLayer.enabled = true;
+          try {
+            if (!forcedLayer.transform.opacity.expression) {
+              forcedLayer.transform.opacity.setValue(100);
+            }
+          } catch (err) {}
+          report.forced++;
+        }
+
+        for (var s = 0; s < group.flipSkipped.length; s++) {
+          report.flipSkipped.push(
+            comp.name + ": " + group.flipSkipped[s].name,
+          );
+        }
+
+        // 排他レイヤーがないグループには制御レイヤーを作らない
+        if (group.exclusiveLayers.length === 0) continue;
+        report.groupCount++;
+
+        createCtrlLayer(ctrlComp, comp.name);
+
+        var layersToRegister = [];
+        for (var r = 0; r < group.exclusiveLayers.length; r++) {
+          var layer = group.exclusiveLayers[r].layer;
+          if (hasOpacitySignature(layer, LAB_MAP_SIGNATURE)) {
+            // 口パク等の合成式は保持（emo 情報は合成式に埋め込み済み）
+            report.kept++;
+            continue;
+          }
+          if (isRegistered(layer)) report.updated++;
+          else report.registered++;
+          layersToRegister.push(layer);
+        }
+        registerLayers(
+          comp,
+          ctrlComp.name,
+          layersToRegister,
+          "EmoLabMaker: PSDセットアップ登録",
+        );
+
+        // デフォルト表情マーカー（初回のみ）
+        var ctrlLayer = findCtrlLayerInComp(ctrlComp, comp.name, 0);
+        var hasMarkers = false;
+        try {
+          hasMarkers = ctrlLayer.property("Marker").numKeys > 0;
+        } catch (err2) {}
+        if (ctrlLayer && !hasMarkers) {
+          var defaultLayer =
+            group.defaultLayer || group.exclusiveLayers[0].layer;
+          writeMarkerNameAtTime(ctrlComp, comp.name, 0, defaultLayer.name);
+          report.markersWritten++;
+        }
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+    return report;
+  }
+
+  /**
+   * 走査結果の確認ダイアログ。
+   * セットアップするグループを選ばせる（誤検出の確認画面を兼ねる）。
+   * OK なら選択されたグループ配列、キャンセルなら null を返す
+   */
+  function showPsdScanDialog(rootComp, groups) {
+    var dialog = new Window("dialog", "PSD 解析結果 - " + rootComp.name);
+    dialog.orientation = "column";
+    dialog.alignChildren = ["fill", "top"];
+    dialog.margins = 16;
+    dialog.spacing = 6;
+
+    dialog.add(
+      "statictext",
+      undefined,
+      "セットアップするグループを選択してください:",
+    );
+
+    var listGroup = dialog.add("group");
+    listGroup.orientation = "column";
+    listGroup.alignChildren = ["fill", "top"];
+    listGroup.spacing = 2;
+
+    var checkboxes = [];
+    for (var i = 0; i < groups.length; i++) {
+      var group = groups[i];
+      var defaultLayer =
+        group.defaultLayer ||
+        (group.exclusiveLayers.length > 0
+          ? group.exclusiveLayers[0].layer
+          : null);
+      var label =
+        group.comp.name +
+        "（排他 " +
+        group.exclusiveLayers.length +
+        " / 強制 " +
+        group.forcedLayers.length +
+        (defaultLayer
+          ? " / 既定: " + parsePsdLayerName(defaultLayer.name).base
+          : "") +
+        "）";
+      var cb = listGroup.add("checkbox", undefined, label);
+      cb.value = group.exclusiveLayers.length > 0;
+      cb.enabled = group.exclusiveLayers.length > 0;
+      checkboxes.push(cb);
+    }
+
+    var noteText = dialog.add(
+      "statictext",
+      undefined,
+      "グループコンポは「" + rootComp.name + "_◯◯」に改名されます",
+    );
+    noteText.graphics.foregroundColor = noteText.graphics.newPen(
+      noteText.graphics.PenType.SOLID_COLOR,
+      [0.6, 0.6, 0.6, 1],
+      1,
+    );
+
+    var btnGroup = dialog.add("group");
+    btnGroup.alignment = ["right", "bottom"];
+    btnGroup.add("button", undefined, "セットアップ", { name: "ok" });
+    btnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
+
+    if (dialog.show() !== 1) return null;
+
+    var selected = [];
+    for (var j = 0; j < groups.length; j++) {
+      if (checkboxes[j].value) selected.push(groups[j]);
+    }
+    return selected;
+  }
+
+  /** セットアップ結果のレポートダイアログ */
+  function showPsdReportDialog(report) {
+    var dialog = new Window("dialog", "PSD セットアップ結果");
+    dialog.orientation = "column";
+    dialog.alignChildren = ["fill", "top"];
+    dialog.margins = 16;
+    dialog.spacing = 6;
+
+    var summaryLines = [
+      "グループ: " + report.groupCount,
+      "新規登録: " + report.registered + " レイヤー",
+      "更新: " + report.updated + " レイヤー",
+    ];
+    if (report.kept > 0) {
+      summaryLines.push("保持（口パク設定済み）: " + report.kept + " レイヤー");
+    }
+    if (report.forced > 0) {
+      summaryLines.push("強制表示 (!): " + report.forced + " レイヤー");
+    }
+    if (report.markersWritten > 0) {
+      summaryLines.push("デフォルト表情マーカー: " + report.markersWritten + " 件");
+    }
+    for (var i = 0; i < summaryLines.length; i++) {
+      dialog.add("statictext", undefined, summaryLines[i]);
+    }
+
+    var detailLines = [];
+    if (report.renamedComps.length > 0) {
+      detailLines.push("【コンポ名の一意化】");
+      detailLines = detailLines.concat(report.renamedComps);
+      detailLines.push("");
+    }
+    if (report.renamedLayers.length > 0) {
+      detailLines.push("【レイヤーのリネーム】");
+      detailLines = detailLines.concat(report.renamedLayers);
+      detailLines.push("");
+    }
+    if (report.flipSkipped.length > 0) {
+      detailLines.push("【スキップした反転バリエーション (:flipx 等は未対応)】");
+      detailLines = detailLines.concat(report.flipSkipped);
+    }
+
+    if (detailLines.length > 0) {
+      var detailBox = dialog.add(
+        "edittext",
+        undefined,
+        detailLines.join("\n"),
+        { multiline: true, scrolling: true, readonly: true },
+      );
+      detailBox.preferredSize = [380, 160];
+    }
+
+    dialog.add("button", undefined, "閉じる", { name: "ok" });
+    dialog.show();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // TAB 3 UI
+  // ══════════════════════════════════════════════════════════════════
+
+  var psdGuide = tabPsd.add("group");
+  psdGuide.orientation = "column";
+  psdGuide.alignChildren = ["fill", "top"];
+  psdGuide.spacing = 2;
+  psdGuide.add(
+    "statictext",
+    undefined,
+    "PSD は AE 標準の読み込みで追加してください:",
+  );
+  psdGuide.add(
+    "statictext",
+    undefined,
+    "ファイル > 読み込み > 「コンポジション - レイヤーサイズを維持」推奨",
+  );
+
+  function addPsdCompRow(labelText) {
+    var row = tabPsd.add("group");
+    row.orientation = "row";
+    row.alignment = ["fill", "top"];
+    row.alignChildren = ["left", "center"];
+    row.spacing = 6;
+
+    var lbl = row.add("statictext", undefined, labelText);
+    lbl.preferredSize = [LABEL_WIDTH, BUTTON_HEIGHT];
+
+    var dropdown = row.add("dropdownlist", undefined, []);
+    dropdown.alignment = ["fill", "center"];
+    dropdown.minimumSize = [DROPDOWN_MIN_W, BUTTON_HEIGHT];
+    dropdown.preferredSize.height = BUTTON_HEIGHT;
+
+    return { row: row, dropdown: dropdown };
+  }
+
+  var psdRootRow = addPsdCompRow("ルート");
+  psdRootRow.dropdown.helpTip = "読み込んだ PSD のルートコンポ";
+
+  var psdRefreshBtn = psdRootRow.row.add("button", undefined, "↺");
+  psdRefreshBtn.preferredSize = [24, BUTTON_HEIGHT];
+  psdRefreshBtn.helpTip = "コンポ一覧を再取得";
+
+  var psdCtrlRow = addPsdCompRow("制御");
+  psdCtrlRow.dropdown.helpTip =
+    "表情マーカーを書き込むコンポ（通常はルートと同じでOK）";
+
+  var psdSetupBtn = tabPsd.add(
+    "button",
+    undefined,
+    "解析してセットアップ / 更新",
+  );
+  psdSetupBtn.alignment = ["fill", "top"];
+  psdSetupBtn.helpTip =
+    "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示) を解釈して表情切替を自動セットアップ。再実行で更新";
+
+  var psdStatusText = tabPsd.add(
+    "statictext",
+    undefined,
+    "PSD のルートコンポを選択してください。",
+  );
+  psdStatusText.alignment = ["fill", "bottom"];
+
+  function refreshPsdDropdowns() {
+    var rootCur = psdRootRow.dropdown.selection
+      ? psdRootRow.dropdown.selection.text
+      : null;
+    var ctrlCur = psdCtrlRow.dropdown.selection
+      ? psdCtrlRow.dropdown.selection.text
+      : null;
+    rebuildDropdown(psdRootRow.dropdown, rootCur);
+    rebuildDropdown(psdCtrlRow.dropdown, ctrlCur);
+  }
+
+  psdRefreshBtn.onClick = function () {
+    refreshPsdDropdowns();
+    psdStatusText.text = "コンポ一覧を更新しました。";
+  };
+
+  // ルート変更時は制御コンポも同じものをデフォルトにする
+  psdRootRow.dropdown.onChange = function () {
+    if (!psdRootRow.dropdown.selection) return;
+    var rootName = psdRootRow.dropdown.selection.text;
+    for (var i = 0; i < psdCtrlRow.dropdown.items.length; i++) {
+      if (psdCtrlRow.dropdown.items[i].text === rootName) {
+        psdCtrlRow.dropdown.selection = i;
+        break;
+      }
+    }
+  };
+
+  psdSetupBtn.onClick = function () {
+    var rootComp = getSelectedComp(psdRootRow.dropdown);
+    var ctrlComp = getSelectedComp(psdCtrlRow.dropdown);
+    if (!rootComp) {
+      psdStatusText.text = "ルートコンポを選択してください。";
+      return;
+    }
+    if (!ctrlComp) {
+      psdStatusText.text = "制御コンポを選択してください。";
+      return;
+    }
+
+    var groups = scanPsdCompTree(rootComp);
+    if (groups.length === 0) {
+      alert(
+        "PSDToolKit の命名規則 (* / !) に該当するレイヤーが見つかりませんでした。\n" +
+          "PSD を「コンポジション」として読み込んだルートコンポを選択してください。",
+      );
+      return;
+    }
+
+    var selectedGroups = showPsdScanDialog(rootComp, groups);
+    if (!selectedGroups) {
+      psdStatusText.text = "キャンセルしました。";
+      return;
+    }
+    if (selectedGroups.length === 0) {
+      psdStatusText.text = "グループが選択されていません。";
+      return;
+    }
+
+    var report = autoSetupPsd(rootComp, ctrlComp, selectedGroups);
+
+    // レイヤー選択タブを即使える状態にする
+    var firstGroup = null;
+    for (var i = 0; i < selectedGroups.length; i++) {
+      if (selectedGroups[i].exclusiveLayers.length > 0) {
+        firstGroup = selectedGroups[i];
+        break;
+      }
+    }
+    rebuildDropdown(
+      targetRow.dropdown,
+      firstGroup ? firstGroup.comp.name : null,
+    );
+    rebuildDropdown(ctrlRow.dropdown, ctrlComp.name);
+    rebuildList();
+    refreshPsdDropdowns();
+
+    showPsdReportDialog(report);
+    psdStatusText.text =
+      "セットアップ完了: " +
+      report.groupCount +
+      " グループ / 新規 " +
+      report.registered +
+      " / 更新 " +
+      report.updated;
+  };
+
   // リサイズ対応
   win.onResizing = win.onResize = function () {
     this.layout.resize();
@@ -1911,6 +2464,8 @@
     var name = activeComp ? activeComp.name : null;
     rebuildDropdown(targetRow.dropdown, name);
     rebuildDropdown(ctrlRow.dropdown, name);
+    rebuildDropdown(psdRootRow.dropdown, name);
+    rebuildDropdown(psdCtrlRow.dropdown, name);
     rebuildList();
   })();
 
