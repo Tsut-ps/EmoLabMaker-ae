@@ -1,11 +1,12 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.4.0
+ * @version 1.5.0
  * @description レイヤー選択 + 口パク + PSDセットアップ 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
  *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
  *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / :flipx) の立ち絵 PSD から表情切替を自動セットアップ
+ *                         目パチ (自動まばたき) の設定も可能
  */
 
 (function emoLabMaker(thisObj) {
@@ -14,6 +15,7 @@
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
+  var BLINK_SIGNATURE = "emoBlinkAuto";
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -2135,8 +2137,11 @@
         var layersToRegister = [];
         for (var r = 0; r < group.exclusiveLayers.length; r++) {
           var layer = group.exclusiveLayers[r].layer;
-          if (hasOpacitySignature(layer, LAB_MAP_SIGNATURE)) {
-            // 口パク等の合成式は保持（emo 情報は合成式に埋め込み済み）
+          if (
+            hasOpacitySignature(layer, LAB_MAP_SIGNATURE) ||
+            hasOpacitySignature(layer, BLINK_SIGNATURE)
+          ) {
+            // 口パク・目パチの合成式は保持（emo 情報は合成式に埋め込み済み）
             report.kept++;
             continue;
           }
@@ -2354,6 +2359,319 @@
   psdSetupBtn.alignment = ["fill", "top"];
   psdSetupBtn.helpTip =
     "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示) を解釈して表情切替を自動セットアップ。再実行で更新";
+
+  // ══════════════════════════════════════════════════════════════════
+  // 目パチ (自動まばたき)
+  // ══════════════════════════════════════════════════════════════════
+
+  /**
+   * 自動まばたきのエクスプレッションを生成する。
+   * マーカー不要の time ベース。seedRandom をサイクル番号で固定するため、
+   * 開き/中間/閉じの全レイヤーが同一スケジュールを共有する（レイヤー間同期）。
+   *
+   * emoCtx あり: 現在の表情マーカーが「開き目」(openNamesCsv) のときだけ
+   *   まばたきし、それ以外の表情中は表情切替のロジックに従う
+   *   （笑い目などで不自然にまばたかない）
+   * emoCtx なし: 常にまばたきし、非まばたき中は開き目を表示する
+   */
+  function buildBlinkExpression(params, role, hasMid, openNamesCsv, emoCtx) {
+    var lines = ["// " + BLINK_SIGNATURE];
+    if (emoCtx) lines.push("// " + EXPR_SIGNATURE);
+
+    lines = lines.concat([
+      'var role = "' + role + '";',
+      "var hasMid = " + (hasMid ? "true" : "false") + ";",
+      "var interval = " + params.interval + ";",
+      "var speed = " + params.speed + ";",
+      "var hold = " + params.hold + ";",
+      "var jitter = " + params.jitter + ";",
+    ]);
+
+    if (emoCtx) {
+      lines.push('var openNames = ",' + openNamesCsv + ',";');
+      lines = lines.concat(
+        buildEmoMarkerSnippet(emoCtx.ctrlCompName, emoCtx.targetCompName),
+      );
+    }
+
+    lines = lines.concat([
+      "function blinkAt(n) {",
+      "  seedRandom(n, true);",
+      "  return n * interval + interval * (0.5 + random(-1, 1) * jitter * 0.5);",
+      "}",
+      "function phaseFor(b) {",
+      "  if (time < b) return 0;",
+      "  if (time < b + speed) return 1;",
+      "  if (time < b + speed + hold) return 2;",
+      "  if (time < b + speed + hold + speed) return 1;",
+      "  return 0;",
+      "}",
+      "var cycle = Math.floor(time / interval);",
+      "var phase = Math.max(phaseFor(blinkAt(cycle)), phaseFor(blinkAt(cycle - 1)));",
+      "if (!hasMid && phase === 1) phase = 2;",
+      "function blinkVisible() {",
+      '  if (role === "closed") return phase === 2;',
+      '  if (role === "mid") return phase === 1;',
+      "  return false;",
+      "}",
+    ]);
+
+    if (emoCtx) {
+      lines = lines.concat([
+        "var ctrlLayer = findCtrlLayer();",
+        "var markerName = getCurrentMarkerName(ctrlLayer);",
+        'var blinkEnabled = markerName !== null && openNames.indexOf("," + markerName + ",") >= 0;',
+        "var result;",
+        "if (blinkEnabled && phase > 0) {",
+        "  result = blinkVisible() ? 100 : 0;",
+        "} else {",
+        "  result = markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+        "}",
+        "result;",
+      ]);
+    } else {
+      lines = lines.concat([
+        "var result;",
+        "if (phase > 0) {",
+        "  result = blinkVisible() ? 100 : 0;",
+        "} else {",
+        '  result = role === "open" ? 100 : 0;',
+        "}",
+        "result;",
+      ]);
+    }
+
+    return lines.join("\n");
+  }
+
+  var blinkPanel = tabPsd.add("panel", undefined, "目パチ (自動まばたき)");
+  blinkPanel.orientation = "column";
+  blinkPanel.alignChildren = ["fill", "top"];
+  blinkPanel.alignment = ["fill", "top"];
+  blinkPanel.spacing = 4;
+  blinkPanel.margins = 10;
+
+  var BLINK_ROLES = [
+    { key: "open", label: "開き目" },
+    { key: "mid", label: "中間(任意)" },
+    { key: "closed", label: "閉じ目" },
+  ];
+
+  var blinkRows = [];
+  for (var brIdx = 0; brIdx < BLINK_ROLES.length; brIdx++) {
+    (function (roleInfo) {
+      var row = blinkPanel.add("group");
+      row.orientation = "row";
+      row.alignment = ["fill", "top"];
+      row.alignChildren = ["left", "center"];
+      row.spacing = 4;
+
+      var lbl = row.add("statictext", undefined, roleInfo.label);
+      lbl.preferredSize = [72, BUTTON_HEIGHT];
+
+      var assignBtn = row.add("button", undefined, "割当");
+      assignBtn.preferredSize = [48, BUTTON_HEIGHT];
+      assignBtn.helpTip =
+        "アクティブコンポの選択レイヤーを「" + roleInfo.label + "」に割当";
+
+      var clearBtn = row.add("button", undefined, "×");
+      clearBtn.preferredSize = [24, BUTTON_HEIGHT];
+
+      var namesText = row.add("statictext", undefined, "（未割当）");
+      namesText.alignment = ["fill", "center"];
+
+      var rowData = {
+        role: roleInfo.key,
+        namesText: namesText,
+        layers: [],
+      };
+      blinkRows.push(rowData);
+
+      assignBtn.onClick = function () {
+        var comp = getActiveComp();
+        if (!comp || comp.selectedLayers.length === 0) {
+          alert("目のレイヤーを選択してください");
+          return;
+        }
+        rowData.layers = [];
+        for (var i = 0; i < comp.selectedLayers.length; i++) {
+          rowData.layers.push(comp.selectedLayers[i]);
+        }
+        namesText.text = describeAssignedLayers(rowData.layers);
+        namesText.helpTip = namesText.text;
+      };
+
+      clearBtn.onClick = function () {
+        rowData.layers = [];
+        namesText.text = "（未割当）";
+        namesText.helpTip = "";
+      };
+    })(BLINK_ROLES[brIdx]);
+  }
+
+  var blinkParamRow = blinkPanel.add("group");
+  blinkParamRow.orientation = "row";
+  blinkParamRow.alignment = ["fill", "top"];
+  blinkParamRow.alignChildren = ["left", "center"];
+  blinkParamRow.spacing = 4;
+
+  blinkParamRow.add("statictext", undefined, "間隔(秒)");
+  var blinkIntervalInput = blinkParamRow.add("edittext", undefined, "4.0");
+  blinkIntervalInput.preferredSize = [44, BUTTON_HEIGHT];
+  blinkIntervalInput.helpTip = "まばたきの平均間隔";
+
+  blinkParamRow.add("statictext", undefined, "速度(秒)");
+  var blinkSpeedInput = blinkParamRow.add("edittext", undefined, "0.07");
+  blinkSpeedInput.preferredSize = [44, BUTTON_HEIGHT];
+  blinkSpeedInput.helpTip = "閉じる/開くのそれぞれにかかる時間";
+
+  blinkParamRow.add("statictext", undefined, "ランダム%");
+  var blinkJitterInput = blinkParamRow.add("edittext", undefined, "40");
+  blinkJitterInput.preferredSize = [36, BUTTON_HEIGHT];
+  blinkJitterInput.helpTip = "間隔のばらつき (0-90)";
+
+  var blinkBtnRow = blinkPanel.add("group");
+  blinkBtnRow.orientation = "row";
+  blinkBtnRow.alignment = ["fill", "top"];
+  blinkBtnRow.alignChildren = ["fill", "center"];
+  blinkBtnRow.spacing = 5;
+
+  var blinkApplyBtn = blinkBtnRow.add("button", undefined, "目パチ設定");
+  blinkApplyBtn.helpTip =
+    "割当レイヤーに自動まばたきを設定（表情登録済みなら開き目表情中のみまばたき）";
+  var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除");
+  blinkRemoveBtn.helpTip =
+    "選択レイヤーの目パチを解除（表情登録済みなら表情切替に戻す）";
+
+  blinkApplyBtn.onClick = function () {
+    var openRow = blinkRows[0];
+    var midRow = blinkRows[1];
+    var closedRow = blinkRows[2];
+
+    if (openRow.layers.length === 0 || closedRow.layers.length === 0) {
+      alert("「開き目」と「閉じ目」の割当が必要です。");
+      return;
+    }
+
+    var interval = parseFloat(blinkIntervalInput.text);
+    var speed = parseFloat(blinkSpeedInput.text);
+    var jitterPct = parseFloat(blinkJitterInput.text);
+    if (isNaN(interval) || interval < 0.5) interval = 4.0;
+    if (isNaN(speed) || speed < 0.01) speed = 0.07;
+    if (isNaN(jitterPct) || jitterPct < 0) jitterPct = 40;
+    if (jitterPct > 90) jitterPct = 90;
+
+    var params = {
+      interval: interval,
+      speed: speed,
+      hold: speed * 0.5,
+      jitter: jitterPct / 100,
+    };
+    var hasMid = midRow.layers.length > 0;
+
+    // 開き目レイヤー名（このマーカー表情のときだけまばたきする）
+    var openNames = [];
+    for (var o = openRow.layers.length - 1; o >= 0; o--) {
+      try {
+        openNames.unshift(openRow.layers[o].name);
+      } catch (e) {
+        openRow.layers.splice(o, 1);
+      }
+    }
+    var openNamesCsv = openNames.join(",");
+
+    var appliedCount = 0;
+    var emoLinkedCount = 0;
+    var skippedCount = 0;
+
+    app.beginUndoGroup("EmoLabMaker: 目パチ設定");
+    try {
+      for (var r = 0; r < blinkRows.length; r++) {
+        var rowData = blinkRows[r];
+        for (var i = 0; i < rowData.layers.length; i++) {
+          var layer = rowData.layers[i];
+          try {
+            if (hasOpacitySignature(layer, LAB_MAP_SIGNATURE)) {
+              // 口パク設定済みのレイヤーには適用しない（不透明度の競合）
+              skippedCount++;
+              continue;
+            }
+            var emoCtx = parseEmoContext(layer);
+            layer.transform.opacity.expression = buildBlinkExpression(
+              params,
+              rowData.role,
+              hasMid,
+              openNamesCsv,
+              emoCtx,
+            );
+            layer.enabled = true;
+            appliedCount++;
+            if (emoCtx) emoLinkedCount++;
+          } catch (err) {
+            skippedCount++;
+          }
+        }
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+
+    var message = "完了: " + appliedCount + " レイヤーに目パチを設定しました。";
+    if (emoLinkedCount > 0) {
+      message +=
+        "\n表情切替と共存: " +
+        emoLinkedCount +
+        " レイヤー（開き目表情中のみまばたき）";
+    }
+    if (skippedCount > 0) {
+      message +=
+        "\nスキップ: " +
+        skippedCount +
+        " レイヤー（口パク設定済み、または削除済み）";
+    }
+    alert(message);
+  };
+
+  blinkRemoveBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp || comp.selectedLayers.length === 0) {
+      alert("解除するレイヤーを選択してください");
+      return;
+    }
+
+    var removedCount = 0;
+    var restoredCount = 0;
+
+    app.beginUndoGroup("EmoLabMaker: 目パチ解除");
+    try {
+      var layers = comp.selectedLayers;
+      for (var i = 0; i < layers.length; i++) {
+        var layer = layers[i];
+        if (!hasOpacitySignature(layer, BLINK_SIGNATURE)) continue;
+
+        var emoCtx = parseEmoContext(layer);
+        if (emoCtx) {
+          layer.transform.opacity.expression = buildOpacityExpression(
+            emoCtx.ctrlCompName,
+            emoCtx.targetCompName,
+          );
+          restoredCount++;
+        } else {
+          layer.transform.opacity.expression = "";
+          layer.transform.opacity.setValue(100);
+        }
+        removedCount++;
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+
+    var message = removedCount + " レイヤーの目パチを解除しました。";
+    if (restoredCount > 0) {
+      message += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
+    }
+    alert(message);
+  };
 
   var psdStatusText = tabPsd.add(
     "statictext",
