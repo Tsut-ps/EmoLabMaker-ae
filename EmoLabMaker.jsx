@@ -1,8 +1,9 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.5.0
+ * @version 1.6.0
  * @description レイヤー選択 + 口パク + PSDセットアップ 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
+ *                         表情セットで複数グループ（目・口・眉など）の一括切替も可能
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
  *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
  *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / :flipx) の立ち絵 PSD から表情切替を自動セットアップ
@@ -389,6 +390,143 @@
   }
 
   // ══════════════════════════════════════════════════════════════════
+  // 表情セット
+  // ══════════════════════════════════════════════════════════════════
+  // 複数グループ（目・口・眉など）の現在マーカーをまとめて保存し、
+  // ワンクリックで一括書き込みする（PSDTool のお気に入り相当）。
+  // セットは制御コンポ内の "[EmoSet] <名前>" ガイドレイヤーの
+  // コメントに「<対象コンポ名>=<マーカー名>」の行形式で保存する
+  // （プロジェクトと一緒に保存され、持ち運べる）
+
+  var SET_PREFIX = "[EmoSet] ";
+
+  /** time 時点で有効なマーカー名（エクスプレッションと同じ判定のスクリプト版） */
+  function getCurrentMarkerNameAt(ctrlLayer, time) {
+    if (!ctrlLayer) return null;
+    var marker;
+    try {
+      marker = ctrlLayer.property("Marker");
+    } catch (e) {
+      return null;
+    }
+    if (!marker || marker.numKeys === 0) return null;
+    var name = null;
+    for (var i = 1; i <= marker.numKeys; i++) {
+      if (marker.keyTime(i) > time + MARKER_EPSILON) break;
+      name = marker.keyValue(i).comment;
+    }
+    return name;
+  }
+
+  /** 制御コンポ内の全制御レイヤーの現在状態を {target, marker} の配列で返す */
+  function captureEmoSet(ctrlComp) {
+    var entries = [];
+    var seen = {};
+    var time = ctrlComp.time;
+    for (var i = 1; i <= ctrlComp.numLayers; i++) {
+      var layer = ctrlComp.layer(i);
+      if (layer.name.indexOf(CTRL_PREFIX) !== 0) continue;
+      var target = layer.name.substring(CTRL_PREFIX.length);
+      if (seen[target]) continue;
+      seen[target] = true;
+      var ctrlLayer = findCtrlLayerInComp(ctrlComp, target, time);
+      var markerName = getCurrentMarkerNameAt(ctrlLayer, time);
+      if (markerName === null) continue;
+      entries.push({ target: target, marker: markerName });
+    }
+    return entries;
+  }
+
+  function parseEmoSetComment(comment) {
+    var entries = [];
+    var lines = String(comment || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      var idx = lines[i].indexOf("=");
+      if (idx <= 0) continue;
+      entries.push({
+        target: lines[i].substring(0, idx),
+        marker: lines[i].substring(idx + 1),
+      });
+    }
+    return entries;
+  }
+
+  function findEmoSetLayer(ctrlComp, setName) {
+    var layerName = SET_PREFIX + setName;
+    for (var i = 1; i <= ctrlComp.numLayers; i++) {
+      if (ctrlComp.layer(i).name === layerName) return ctrlComp.layer(i);
+    }
+    return null;
+  }
+
+  function collectEmoSetNames(ctrlComp) {
+    var names = [];
+    if (!ctrlComp) return names;
+    for (var i = 1; i <= ctrlComp.numLayers; i++) {
+      var layer = ctrlComp.layer(i);
+      if (layer.name.indexOf(SET_PREFIX) === 0) {
+        names.push(layer.name.substring(SET_PREFIX.length));
+      }
+    }
+    return names;
+  }
+
+  /** セットを保存（同名があれば上書き） */
+  function saveEmoSet(ctrlComp, setName, entries) {
+    var lines = [];
+    for (var i = 0; i < entries.length; i++) {
+      lines.push(entries[i].target + "=" + entries[i].marker);
+    }
+
+    app.beginUndoGroup("emo2layer: 表情セット保存");
+    try {
+      var layer = findEmoSetLayer(ctrlComp, setName);
+      if (!layer) {
+        layer = ctrlComp.layers.addNull(ctrlComp.duration);
+        layer.name = SET_PREFIX + setName;
+        layer.startTime = 0;
+        try {
+          layer.outPoint = ctrlComp.duration;
+        } catch (e) {}
+        layer.shy = true;
+        layer.guideLayer = true;
+        layer.enabled = false;
+        layer.label = 14;
+      }
+      layer.comment = lines.join("\n");
+    } finally {
+      app.endUndoGroup();
+    }
+  }
+
+  /** セットを制御コンポの現在時刻に一括書き込みする */
+  function applyEmoSet(ctrlComp, setName) {
+    var layer = findEmoSetLayer(ctrlComp, setName);
+    if (!layer) return null;
+
+    var entries = parseEmoSetComment(layer.comment);
+    var applied = 0;
+    var missing = 0;
+
+    app.beginUndoGroup("emo2layer: 表情セット適用");
+    try {
+      for (var i = 0; i < entries.length; i++) {
+        var ok = writeMarkerNameAtTime(
+          ctrlComp,
+          entries[i].target,
+          ctrlComp.time,
+          entries[i].marker,
+        );
+        if (ok) applied++;
+        else missing++;
+      }
+    } finally {
+      app.endUndoGroup();
+    }
+    return { applied: applied, missing: missing };
+  }
+
+  // ══════════════════════════════════════════════════════════════════
   // グリッドレイアウト計算
   // ══════════════════════════════════════════════════════════════════
 
@@ -520,6 +658,32 @@
   markerGrid.alignment = ["fill", "fill"];
   markerGrid.spacing = GRID_SPACING;
 
+  // ── 表情セット ───────────────────────────────────────────────────
+  var emoSetPanel = tabSelector.add("panel", undefined, "表情セット (一括切替)");
+  emoSetPanel.orientation = "row";
+  emoSetPanel.alignment = ["fill", "top"];
+  emoSetPanel.alignChildren = ["left", "center"];
+  emoSetPanel.spacing = 4;
+  emoSetPanel.margins = PANEL_MARGIN;
+
+  var emoSetDropdown = emoSetPanel.add("dropdownlist", undefined, []);
+  emoSetDropdown.alignment = ["fill", "center"];
+  emoSetDropdown.minimumSize = [100, BUTTON_HEIGHT];
+  emoSetDropdown.preferredSize.height = BUTTON_HEIGHT;
+  emoSetDropdown.helpTip = "制御コンポに保存された表情セット";
+
+  var emoSetApplyBtn = emoSetPanel.add("button", undefined, "適用");
+  emoSetApplyBtn.preferredSize = [48, BUTTON_HEIGHT];
+  emoSetApplyBtn.helpTip =
+    "全グループのマーカーを制御コンポの現在時刻に一括書き込み";
+
+  var emoSetSaveBtn = emoSetPanel.add("button", undefined, "保存");
+  emoSetSaveBtn.preferredSize = [48, BUTTON_HEIGHT];
+  emoSetSaveBtn.helpTip = "現在の表情（全グループのマーカー状態）をセットとして保存";
+
+  var emoSetDeleteBtn = emoSetPanel.add("button", undefined, "削除");
+  emoSetDeleteBtn.preferredSize = [48, BUTTON_HEIGHT];
+
   // ── ステータスバー ───────────────────────────────────────────────
   var statusText = tabSelector.add(
     "statictext",
@@ -604,6 +768,23 @@
       }
     }
     dropdown.selection = 0;
+  }
+
+  function rebuildEmoSetDropdown(selectedName) {
+    var ctrlComp = getSelectedComp(ctrlRow.dropdown);
+    var names = collectEmoSetNames(ctrlComp);
+    emoSetDropdown.removeAll();
+    for (var i = 0; i < names.length; i++) {
+      emoSetDropdown.add("item", names[i]);
+    }
+    if (emoSetDropdown.items.length === 0) return;
+    for (var j = 0; j < emoSetDropdown.items.length; j++) {
+      if (emoSetDropdown.items[j].text === selectedName) {
+        emoSetDropdown.selection = j;
+        return;
+      }
+    }
+    emoSetDropdown.selection = 0;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -715,6 +896,9 @@
 
     updateInfo(targetComp);
     rebuildMarkerGrid();
+    rebuildEmoSetDropdown(
+      emoSetDropdown.selection ? emoSetDropdown.selection.text : null,
+    );
 
     if (!targetComp) setStatus("対象コンポを選択してください。");
   }
@@ -853,6 +1037,110 @@
   };
   ctrlRow.dropdown.onChange = function () {
     rebuildList();
+  };
+
+  // ── 表情セット ───────────────────────────────────────────────────
+
+  function promptForSetName(defaultName) {
+    var dialog = new Window("dialog", "表情セット名");
+    dialog.orientation = "column";
+    dialog.alignChildren = ["fill", "top"];
+    dialog.margins = 16;
+    dialog.spacing = 8;
+
+    dialog.add("statictext", undefined, "セット名（同名があれば上書き）:");
+    var input = dialog.add("edittext", undefined, defaultName || "");
+    input.preferredSize = [220, BUTTON_HEIGHT];
+    input.active = true;
+
+    var btns = dialog.add("group");
+    btns.alignment = ["right", "top"];
+    btns.add("button", undefined, "OK", { name: "ok" });
+    btns.add("button", undefined, "キャンセル", { name: "cancel" });
+
+    if (dialog.show() !== 1) return null;
+    var name = input.text.replace(/^\s+|\s+$/g, "");
+    return name.length > 0 ? name : null;
+  }
+
+  emoSetSaveBtn.onClick = function () {
+    var ctrlComp = getSelectedComp(ctrlRow.dropdown);
+    if (!ctrlComp) {
+      setStatus("制御コンポを選択してください。");
+      return;
+    }
+
+    var entries = captureEmoSet(ctrlComp);
+    if (entries.length === 0) {
+      alert(
+        "保存できる状態がありません。\n制御レイヤーにマーカーを書き込んでから保存してください。",
+      );
+      return;
+    }
+
+    var defaultName = emoSetDropdown.selection
+      ? emoSetDropdown.selection.text
+      : "セット1";
+    var setName = promptForSetName(defaultName);
+    if (!setName) return;
+
+    saveEmoSet(ctrlComp, setName, entries);
+    rebuildEmoSetDropdown(setName);
+    setStatus(
+      "表情セット「" + setName + "」を保存しました（" + entries.length + " グループ）。",
+    );
+  };
+
+  emoSetApplyBtn.onClick = function () {
+    var ctrlComp = getSelectedComp(ctrlRow.dropdown);
+    if (!ctrlComp) {
+      setStatus("制御コンポを選択してください。");
+      return;
+    }
+    if (!emoSetDropdown.selection) {
+      setStatus("適用する表情セットを選択してください。");
+      return;
+    }
+
+    var setName = emoSetDropdown.selection.text;
+    var result = applyEmoSet(ctrlComp, setName);
+    if (!result) {
+      setStatus("表情セットが見つかりません: " + setName);
+      rebuildEmoSetDropdown(null);
+      return;
+    }
+
+    var message =
+      "表情セット「" + setName + "」を適用しました（" + result.applied + " グループ）。";
+    if (result.missing > 0) {
+      message += " 制御レイヤー未検出: " + result.missing;
+    }
+    setStatus(message);
+  };
+
+  emoSetDeleteBtn.onClick = function () {
+    var ctrlComp = getSelectedComp(ctrlRow.dropdown);
+    if (!ctrlComp || !emoSetDropdown.selection) {
+      setStatus("削除する表情セットを選択してください。");
+      return;
+    }
+
+    var setName = emoSetDropdown.selection.text;
+    var layer = findEmoSetLayer(ctrlComp, setName);
+    if (!layer) {
+      rebuildEmoSetDropdown(null);
+      return;
+    }
+    if (!confirm("表情セット「" + setName + "」を削除しますか？")) return;
+
+    app.beginUndoGroup("emo2layer: 表情セット削除");
+    try {
+      layer.remove();
+    } finally {
+      app.endUndoGroup();
+    }
+    rebuildEmoSetDropdown(null);
+    setStatus("表情セット「" + setName + "」を削除しました。");
   };
 
   // ════════════════════════════════════════════════════════════════
