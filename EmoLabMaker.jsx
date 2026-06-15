@@ -1,15 +1,13 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.7.0
- * @description レイヤー選択 + 口パク + PSDセットアップ + 立ち絵 統合パネル
- *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
- *                         表情セットで複数グループ（目・口・眉など）の一括切替も可能
- *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
- *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
- *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
- *                         目パチ (自動まばたき) の設定も可能
- *   Tab 4 "立ち絵"      : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える
- *                         マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
+ * @version 1.8.0
+ * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
+ *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
+ *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
+ *                 口階層の「口」ボタンで lab 口パクをワンクリック割当
+ *   Tab "口パク" : labファイルを解析して音素レイヤーを生成 + 口形状マッピング (PSDToolKit互換)
+ *   Tab "PSD"    : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ + 目パチ
+ *   Tab "詳細"   : 指定レイヤーを登録し、任意の場所のマーカーで表示を切り替える低レベル編集 + 表情セット
  */
 
 (function emoLabMaker(thisObj) {
@@ -65,10 +63,11 @@
   var tabs = win.add("tabbedpanel");
   tabs.alignment = ["fill", "fill"];
 
-  var tabSelector = tabs.add("tab", undefined, "レイヤー選択");
+  // 表示順は作業フロー基準: 立ち絵(日常のハブ) → 口パク → PSD(初期セットアップ) → 詳細(旧レイヤー選択)
+  var tabStage = tabs.add("tab", undefined, "立ち絵");
   var tabLab = tabs.add("tab", undefined, "口パク");
   var tabPsd = tabs.add("tab", undefined, "PSD");
-  var tabStage = tabs.add("tab", undefined, "立ち絵");
+  var tabSelector = tabs.add("tab", undefined, "詳細");
 
   tabSelector.orientation = "column";
   tabSelector.alignChildren = ["fill", "top"];
@@ -1359,6 +1358,58 @@
     return entries;
   }
 
+  /** 音素エントリ(音素別 times)を全出現にフラット化し、開始時間順にソート */
+  function flattenLabEntries(entries) {
+    var out = [];
+    for (var i = 0; i < entries.length; i++) {
+      for (var j = 0; j < entries[i].times.length; j++) {
+        out.push({
+          startTime: entries[i].times[j].start,
+          endTime: entries[i].times[j].end,
+          phoneme: entries[i].phoneme,
+        });
+      }
+    }
+    out.sort(function (a, b) {
+      return a.startTime - b.startTime;
+    });
+    return out;
+  }
+
+  /**
+   * targetLayer に音素マーカーを配置する（既存マーカーは全削除してから）。
+   * selectedPhonemes は {startTime,endTime,phoneme} の配列（開始時間順）。
+   */
+  function writeLabMarkers(targetLayer, attachTime, labStartTime, selectedPhonemes, offsetSec) {
+    var markers = targetLayer.property("Marker");
+    for (var i = markers.numKeys; i >= 1; i--) {
+      markers.removeKey(i);
+    }
+    for (var k = 0; k < selectedPhonemes.length; k++) {
+      var markerTime =
+        attachTime + (selectedPhonemes[k].startTime - labStartTime) + offsetSec;
+      targetLayer
+        .property("Marker")
+        .setValueAtTime(markerTime, new MarkerValue(selectedPhonemes[k].phoneme));
+    }
+  }
+
+  /**
+   * comp に [Lab] ヌルレイヤーを新規作成し、全音素マーカーを配置する。
+   * 立ち絵タブの簡易 lab ローダ用。作成したレイヤーを返す（音素ゼロなら null）。
+   */
+  function placeLabIntoComp(comp, attachTime, entries, offsetSec, labName) {
+    var sel = flattenLabEntries(entries);
+    if (sel.length === 0) return null;
+    var labStart = sel[0].startTime;
+    var duration = sel[sel.length - 1].endTime - labStart;
+    var layer = comp.layers.addNull(duration);
+    layer.name = "[Lab] " + labName;
+    layer.startTime = attachTime;
+    writeLabMarkers(layer, attachTime, labStart, sel, offsetSec);
+    return layer;
+  }
+
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
   function buildSortedPhonemeList(entries) {
     var sorted = [];
@@ -1645,6 +1696,64 @@
     return names.length > 0 ? names.join(", ") : "（未割当）";
   }
 
+  /**
+   * 口形ラベル（base名: あ/い/う/え/お/ん/閉 など）から
+   * PSDToolKit 互換プリセット { csv, isClosedFallback } を返す。該当なしは null。
+   * 立ち絵タブの「口パク割当」で子レイヤーを自動マッピングするのに使う。
+   */
+  function mouthPresetForLabel(label) {
+    if (!label) return null;
+    // 厳格判定: 「笑い」など母音字を含むだけの非口レイヤーを誤検出しないため
+    // 閉じ口（「閉」を含む / ちょうど「ん」）
+    if (label.indexOf("閉") >= 0 || label === "ん") {
+      return { csv: MOUTH_SHAPES[5].preset, isClosedFallback: true, vowel: false };
+    }
+    // 母音はラベル完全一致のみ（あ/い/う/え/お）
+    var vowels = ["あ", "い", "う", "え", "お"];
+    for (var i = 0; i < vowels.length; i++) {
+      if (label === vowels[i]) {
+        return {
+          csv: MOUTH_SHAPES[i].preset,
+          isClosedFallback: false,
+          vowel: true,
+        };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * items = [{ layer, myCsv, isClosedFallback }] に口形マッピング式を適用する。
+   * emoCtx があれば非発話中は表情のラジオ選択にフォールバックする合成式になる。
+   * 戻り値: { applied, emoLinked, stale }
+   */
+  function applyMappingToLayers(items, phonemeCompName, allCsv) {
+    var applied = 0;
+    var emoLinked = 0;
+    var stale = 0;
+    for (var i = 0; i < items.length; i++) {
+      var it = items[i];
+      var emoCtx = null;
+      try {
+        emoCtx = parseEmoContext(it.layer);
+        it.layer.transform.opacity.expression = buildLabMappedExpression(
+          phonemeCompName,
+          it.myCsv,
+          allCsv,
+          it.isClosedFallback,
+          emoCtx,
+        );
+        it.layer.enabled = true;
+      } catch (e) {
+        stale++;
+        continue;
+      }
+      applied++;
+      if (emoCtx) emoLinked++;
+    }
+    return { applied: applied, emoLinked: emoLinked, stale: stale };
+  }
+
   var mouthMapPanel = tabLab.add(
     "panel",
     undefined,
@@ -1811,41 +1920,32 @@
     if (!phonemeCompName) return;
 
     var allCsv = allTokens.join(",");
-    var appliedCount = 0;
-    var emoLinkedCount = 0;
-    var staleCount = 0;
 
+    // 全行のレイヤーを items 化して一括適用
+    var items = [];
+    for (var i = 0; i < mouthRows.length; i++) {
+      var row = mouthRows[i];
+      var myCsv = row.tokens.join(",");
+      var isClosedFallback = !!row.shape.closedFallback;
+      for (var j = 0; j < row.layers.length; j++) {
+        items.push({
+          layer: row.layers[j],
+          myCsv: myCsv,
+          isClosedFallback: isClosedFallback,
+        });
+      }
+    }
+
+    var result;
     app.beginUndoGroup("lab2layer: 口形状マッピング適用");
     try {
-      for (var i = 0; i < mouthRows.length; i++) {
-        var row = mouthRows[i];
-        var myCsv = row.tokens.join(",");
-        var isClosedFallback = !!row.shape.closedFallback;
-
-        for (var j = 0; j < row.layers.length; j++) {
-          var layer = row.layers[j];
-          var emoCtx = null;
-          try {
-            emoCtx = parseEmoContext(layer);
-            layer.transform.opacity.expression = buildLabMappedExpression(
-              phonemeCompName,
-              myCsv,
-              allCsv,
-              isClosedFallback,
-              emoCtx,
-            );
-            layer.enabled = true;
-          } catch (e) {
-            staleCount++;
-            continue;
-          }
-          appliedCount++;
-          if (emoCtx) emoLinkedCount++;
-        }
-      }
+      result = applyMappingToLayers(items, phonemeCompName, allCsv);
     } finally {
       app.endUndoGroup();
     }
+    var appliedCount = result.applied;
+    var emoLinkedCount = result.emoLinked;
+    var staleCount = result.stale;
 
     var message =
       "完了: " +
@@ -2166,20 +2266,8 @@
     var offsetMs = parseFloat(offsetInput.text) || 0;
     var offsetSec = offsetMs / 1000;
 
-    // 既存のマーカーを全て削除
-    var markers = targetLayer.property("Marker");
-    var numMarkers = markers.numKeys;
-    for (var i = numMarkers; i >= 1; i--) {
-      markers.removeKey(i);
-    }
-
-    // マーカー配置
-    for (var i = 0; i < selectedPhonemes.length; i++) {
-      var markerTime =
-        attachTime + (selectedPhonemes[i].startTime - labStartTime) + offsetSec;
-      var newMarker = new MarkerValue(selectedPhonemes[i].phoneme);
-      targetLayer.property("Marker").setValueAtTime(markerTime, newMarker);
-    }
+    // 既存マーカーを削除して配置（共通関数）
+    writeLabMarkers(targetLayer, attachTime, labStartTime, selectedPhonemes, offsetSec);
 
     app.endUndoGroup();
 
@@ -3249,11 +3337,11 @@
         if (parsed.flipx || parsed.flipy) {
           // flip バリエーションは選択肢にしない
         } else if (parsed.exclusive) {
-          radio.push({ fullName: layer.name, label: parsed.base });
+          radio.push({ fullName: layer.name, label: parsed.base, layer: layer });
         } else if (parsed.forced) {
-          forced.push({ fullName: layer.name, label: parsed.base });
+          forced.push({ fullName: layer.name, label: parsed.base, layer: layer });
         } else if (!isFolder) {
-          optional.push({ fullName: layer.name, label: parsed.base });
+          optional.push({ fullName: layer.name, label: parsed.base, layer: layer });
         }
 
         if (!nodeCtrlName) {
@@ -3324,6 +3412,30 @@
   stageGrid.alignment = ["fill", "fill"];
   stageGrid.spacing = GRID_SPACING;
 
+  // 口パク lab ローダ（制御コンポに [Lab] を配置）
+  var stageLabPanel = tabStage.add("panel", undefined, "口パク (lab)");
+  stageLabPanel.orientation = "row";
+  stageLabPanel.alignment = ["fill", "top"];
+  stageLabPanel.alignChildren = ["left", "center"];
+  stageLabPanel.spacing = 4;
+  stageLabPanel.margins = PANEL_MARGIN;
+
+  stageLabPanel.add("statictext", undefined, "lab");
+  var stageLabPathText = stageLabPanel.add("edittext", undefined, "未選択");
+  stageLabPathText.alignment = ["fill", "center"];
+  stageLabPathText.enabled = false;
+  var stageLabBrowseBtn = stageLabPanel.add("button", undefined, "...");
+  stageLabBrowseBtn.preferredSize = [30, BUTTON_HEIGHT];
+  stageLabBrowseBtn.helpTip = "labファイルを選択";
+  stageLabPanel.add("statictext", undefined, "ofs");
+  var stageLabOffsetInput = stageLabPanel.add("edittext", undefined, "-67");
+  stageLabOffsetInput.preferredSize = [40, BUTTON_HEIGHT];
+  stageLabOffsetInput.helpTip = "オフセット(ms)。映像先行は負の値";
+  var stageLabPlaceBtn = stageLabPanel.add("button", undefined, "配置");
+  stageLabPlaceBtn.preferredSize = [48, BUTTON_HEIGHT];
+  stageLabPlaceBtn.helpTip =
+    "再生ヘッド位置に [Lab] を制御コンポへ配置。各口階層の「口」で割当";
+
   var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
   stageSetPanel.orientation = "row";
   stageSetPanel.alignment = ["fill", "top"];
@@ -3355,6 +3467,8 @@
   var stageCollapsed = {};
   var stageCtrlComp = null;
   var isRebuildingStage = false;
+  var stageLabEntries = null;
+  var stageLabName = "音素";
 
   function setStageStatus(text) {
     stageStatusText.text = text;
@@ -3500,6 +3614,57 @@
           fcb.helpTip = "常に表示 (!)";
         }
 
+        // 口パク割当ボタン: 子 choice に母音(あ/い/う/え/お)が1つ以上あれば表示
+        // （母音ゼロの目階層などには出さない＝誤割当防止）
+        var mouthItems = [];
+        var mouthTokens = [];
+        var mouthSeen = {};
+        var mouthVowelCount = 0;
+        var allChoices = node.radioChoices.concat(node.optionalChoices);
+        for (rr = 0; rr < allChoices.length; rr++) {
+          var preset = mouthPresetForLabel(allChoices[rr].label);
+          if (!preset) continue;
+          if (preset.vowel) mouthVowelCount++;
+          mouthItems.push({
+            layer: allChoices[rr].layer,
+            myCsv: preset.csv,
+            isClosedFallback: preset.isClosedFallback,
+          });
+          var toks = normalizeCsvTokens(preset.csv);
+          for (var mt = 0; mt < toks.length; mt++) {
+            if (mouthSeen[toks[mt]]) continue;
+            mouthSeen[toks[mt]] = true;
+            mouthTokens.push(toks[mt]);
+          }
+        }
+        if (mouthItems.length > 0 && mouthVowelCount > 0) {
+          (function (nd, items, allCsv) {
+            var mbtn = row.add("button", undefined, "口");
+            mbtn.preferredSize = [28, BUTTON_HEIGHT];
+            mbtn.helpTip =
+              "この階層の口形(" +
+              items.length +
+              "枚)に lab 口パクを割当（あ/い/う…を自動マッピング）";
+            mbtn.onClick = function () {
+              if (!stageCtrlComp) {
+                setStageStatus("制御コンポが見つかりません。");
+                return;
+              }
+              var result;
+              app.beginUndoGroup("立ち絵: 口パク割当");
+              try {
+                result = applyMappingToLayers(items, stageCtrlComp.name, allCsv);
+              } finally {
+                app.endUndoGroup();
+              }
+              var msg = nd.displayName + ": " + result.applied + " 枚を口パク割当";
+              if (result.emoLinked > 0) msg += "（表情と共存 " + result.emoLinked + "）";
+              setStageStatus(msg);
+              refreshStage(false);
+            };
+          })(node, mouthItems, mouthTokens.join(","));
+        }
+
         if (node.hasChildren && isCollapsed) collapseDepth = node.depth;
       }
 
@@ -3600,6 +3765,50 @@
     refreshStage(false);
   };
 
+  stageLabBrowseBtn.onClick = function () {
+    var f = File.openDialog("labファイルを選択", "*.lab");
+    if (!f) return;
+    f.open("r");
+    var content = f.read();
+    f.close();
+    stageLabEntries = parseLabPhonemeEntries(content);
+    stageLabName = decodeURI(f.name).replace(/\.lab$/i, "");
+    stageLabPathText.text = decodeURI(f.name);
+    setStageStatus("lab を読み込みました。『配置』で制御コンポに音素を置きます。");
+  };
+
+  stageLabPlaceBtn.onClick = function () {
+    if (!stageLabEntries) {
+      setStageStatus("先に lab を選択してください（...）。");
+      return;
+    }
+    if (!stageCtrlComp) {
+      setStageStatus("立ち絵ルートを選択してください。");
+      return;
+    }
+    var offsetMs = parseFloat(stageLabOffsetInput.text) || 0;
+    var layer = null;
+    app.beginUndoGroup("立ち絵: lab配置");
+    try {
+      layer = placeLabIntoComp(
+        stageCtrlComp,
+        stageCtrlComp.time,
+        stageLabEntries,
+        offsetMs / 1000,
+        stageLabName,
+      );
+    } finally {
+      app.endUndoGroup();
+    }
+    if (!layer) {
+      setStageStatus("配置できる音素がありませんでした。");
+      return;
+    }
+    setStageStatus(
+      "[Lab] を配置しました: " + stageCtrlComp.name + " / 各口階層の「口」で割当",
+    );
+  };
+
   stageSetSaveBtn.onClick = function () {
     if (!stageCtrlComp) {
       setStageStatus("立ち絵ルートを選択してください。");
@@ -3672,6 +3881,14 @@
   // タブ切替時、立ち絵タブを開いたら最新化
   tabs.onChange = function () {
     if (tabs.selection === tabStage) refreshStage(true);
+  };
+
+  // ウィンドウ/パネルがアクティブになったら立ち絵タブを自動更新
+  // （タイムラインで再生ヘッド移動 → パネルをクリックで戻る、を吸収。手動「更新」依存を軽減）
+  win.onActivate = function () {
+    try {
+      if (tabs.selection === tabStage) refreshStage(false);
+    } catch (e) {}
   };
 
   // ════════════════════════════════════════════════════════════════
