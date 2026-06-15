@@ -1,13 +1,15 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.6.0
- * @description レイヤー選択 + 口パク + PSDセットアップ 統合パネル
+ * @version 1.7.0
+ * @description レイヤー選択 + 口パク + PSDセットアップ + 立ち絵 統合パネル
  *   Tab 1 "レイヤー選択" : 指定レイヤーを登録し、任意の場所のマーカーで排他的に表示を切り替える
  *                         表情セットで複数グループ（目・口・眉など）の一括切替も可能
  *   Tab 2 "口パク"      : labファイルを解析して音素レイヤーを生成 + 不透明度エクスプレッションを設定するツール
  *                         口形状マッピング (PSDToolKit互換) で あ/い/う/え/お/ん への音素割当も可能
- *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / :flipx) の立ち絵 PSD から表情切替を自動セットアップ
+ *   Tab 3 "PSD"         : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
  *                         目パチ (自動まばたき) の設定も可能
+ *   Tab 4 "立ち絵"      : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える
+ *                         マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
  */
 
 (function emoLabMaker(thisObj) {
@@ -66,6 +68,7 @@
   var tabSelector = tabs.add("tab", undefined, "レイヤー選択");
   var tabLab = tabs.add("tab", undefined, "口パク");
   var tabPsd = tabs.add("tab", undefined, "PSD");
+  var tabStage = tabs.add("tab", undefined, "立ち絵");
 
   tabSelector.orientation = "column";
   tabSelector.alignChildren = ["fill", "top"];
@@ -81,6 +84,11 @@
   tabPsd.alignChildren = ["fill", "top"];
   tabPsd.spacing = 8;
   tabPsd.margins = 8;
+
+  tabStage.orientation = "column";
+  tabStage.alignChildren = ["fill", "top"];
+  tabStage.spacing = 8;
+  tabStage.margins = 8;
 
   tabs.selection = 0;
 
@@ -197,7 +205,8 @@
       .concat([
         "var ctrlLayer = findCtrlLayer();",
         "var markerName = getCurrentMarkerName(ctrlLayer);",
-        "markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+        // markerName は「表示中レイヤー名の集合」(カンマ区切り)。単一名は1要素集合として一致
+        'markerName !== null && ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
       ])
       .join("\n");
   }
@@ -389,6 +398,53 @@
     );
   }
 
+  // ── 表示中集合（マーカー）の読み書き ──────────────────────────────
+  // マーカーコメント = 表示中レイヤー名の集合（カンマ区切り）。
+  // ラジオ（*）も任意指定（無印）も同じ集合で表現する。
+  // 名前はプレフィックス付きの完全名で扱う。
+
+  function parseSetString(str) {
+    var out = [];
+    if (str === null || str === undefined) return out;
+    var parts = String(str).split(",");
+    for (var i = 0; i < parts.length; i++) {
+      if (parts[i].length > 0) out.push(parts[i]);
+    }
+    return out;
+  }
+
+  function indexOfName(arr, name) {
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] === name) return i;
+    }
+    return -1;
+  }
+
+  function readVisibleSet(ctrlComp, targetCompName, time) {
+    var ctrlLayer = findCtrlLayerInComp(ctrlComp, targetCompName, time);
+    return parseSetString(getCurrentMarkerNameAt(ctrlLayer, time));
+  }
+
+  /** 同グループのラジオ候補を集合から除き chosenName のみにする（排他選択） */
+  function setRadioSelection(ctrlComp, targetCompName, time, chosenName, radioNames) {
+    var set = readVisibleSet(ctrlComp, targetCompName, time);
+    var next = [];
+    for (var i = 0; i < set.length; i++) {
+      if (indexOfName(radioNames, set[i]) < 0) next.push(set[i]);
+    }
+    next.push(chosenName);
+    return writeMarkerNameAtTime(ctrlComp, targetCompName, time, next.join(","));
+  }
+
+  /** layerName を集合からトグル（独立 ON/OFF） */
+  function toggleLayerInSet(ctrlComp, targetCompName, time, layerName) {
+    var set = readVisibleSet(ctrlComp, targetCompName, time);
+    var at = indexOfName(set, layerName);
+    if (at >= 0) set.splice(at, 1);
+    else set.push(layerName);
+    return writeMarkerNameAtTime(ctrlComp, targetCompName, time, set.join(","));
+  }
+
   // ══════════════════════════════════════════════════════════════════
   // 表情セット
   // ══════════════════════════════════════════════════════════════════
@@ -551,6 +607,35 @@
     var margin = getPanelMargin();
     var innerWidth = panelWidth - margin * 2;
     var bw = Math.floor((innerWidth - (columns - 1) * GRID_SPACING) / columns);
+    return bw < GRID_MIN_BTN_W ? GRID_MIN_BTN_W : bw;
+  }
+
+  // panel 引数版（立ち絵タブなど markerGridPanel 以外でも使う）
+  function getPanelMarginOf(panel) {
+    var m = panel.margins;
+    if (typeof m === "number") return m;
+    if (m && typeof m.left === "number") return m.left;
+    return PANEL_MARGIN;
+  }
+
+  function getGridColumnsOf(panel, availWidth) {
+    var width = availWidth;
+    if (width === undefined || width === null) {
+      width = panel.size ? panel.size.width : 360;
+    }
+    var columns = Math.floor(width / (GRID_MIN_BTN_W + GRID_SPACING));
+    if (columns < 1) columns = 1;
+    if (columns > 4) columns = 4;
+    return columns;
+  }
+
+  function getGridButtonWidthOf(panel, columns, availWidth) {
+    var panelWidth = availWidth;
+    if (panelWidth === undefined || panelWidth === null) {
+      panelWidth = panel.size ? panel.size.width : 360;
+      panelWidth -= getPanelMarginOf(panel) * 2;
+    }
+    var bw = Math.floor((panelWidth - (columns - 1) * GRID_SPACING) / columns);
     return bw < GRID_MIN_BTN_W ? GRID_MIN_BTN_W : bw;
   }
 
@@ -825,7 +910,9 @@
 
           var markerName = currentMarkerNames[idx];
           var isSelected = currentSelectedMarker === markerName;
-          var label = isSelected ? "\u2714 " + markerName : markerName;
+          // \u8868\u793a\u306f base \u540d\uff08* / ! \u3092\u5265\u304c\u3059\uff09\u3002\u5024\u30fbhelpTip \u306f\u5b8c\u5168\u540d\u306e\u307e\u307e
+          var baseLabel = parsePsdLayerName(markerName).base;
+          var label = isSelected ? "\u2714 " + baseLabel : baseLabel;
 
           var btn = rowGroup.add("button", undefined, label);
           btn.size = [btnWidth, BUTTON_HEIGHT];
@@ -1408,7 +1495,7 @@
           "} else {",
           "  var ctrlLayer = findCtrlLayer();",
           "  var markerName = getCurrentMarkerName(ctrlLayer);",
-          "  result = markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+          '  result = markerName !== null && ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
           "}",
           "result;",
         ]);
@@ -2269,6 +2356,7 @@
       var info = {
         comp: comp,
         exclusiveLayers: [],
+        optionalLayers: [],
         forcedLayers: [],
         flipSkipped: [],
         defaultLayer: null,
@@ -2278,6 +2366,12 @@
         var layer = comp.layer(i);
         var parsed = parsePsdLayerName(layer.name);
 
+        var source = null;
+        try {
+          source = layer.source;
+        } catch (e) {}
+        var isFolder = !!(source && source instanceof CompItem);
+
         if (parsed.flipx || parsed.flipy) {
           // 反転バリエーションは v1 では未対応。表示状態はそのまま維持する
           if (parsed.exclusive || parsed.forced) info.flipSkipped.push(layer);
@@ -2286,16 +2380,20 @@
           if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
         } else if (parsed.forced) {
           info.forcedLayers.push(layer);
+        } else if (!isFolder) {
+          // プレフィックスなしリーフ = 任意指定（独立 ON/OFF）。
+          // 無印フォルダはコンテナ扱いで選択肢にしない
+          info.optionalLayers.push({ layer: layer, parsed: parsed });
         }
 
-        var source = null;
-        try {
-          source = layer.source;
-        } catch (e) {}
-        if (source && source instanceof CompItem) scanComp(source);
+        if (isFolder) scanComp(source);
       }
 
-      if (info.exclusiveLayers.length > 0 || info.forcedLayers.length > 0) {
+      if (
+        info.exclusiveLayers.length > 0 ||
+        info.optionalLayers.length > 0 ||
+        info.forcedLayers.length > 0
+      ) {
         groups.push(info);
       }
     }
@@ -2387,17 +2485,8 @@
         var compRename = uniquifyGroupCompName(rootComp, comp);
         if (compRename) report.renamedComps.push(compRename);
 
-        // * prefix を剥がす（マーカー名・ボタン表示に * を残さない）
-        for (var e = 0; e < group.exclusiveLayers.length; e++) {
-          var entry = group.exclusiveLayers[e];
-          if (entry.layer.name !== entry.parsed.base) {
-            report.renamedLayers.push(
-              comp.name + ": " + entry.layer.name + " → " + entry.parsed.base,
-            );
-            entry.layer.name = entry.parsed.base;
-          }
-        }
-
+        // プレフィックス（* / !）は剥がさず保持する（種別を名前から判別できるように）。
+        // 同名重複だけは誤マッチ防止のためリネームする
         var dedupeRenames = dedupeLayerNames(comp);
         for (var d = 0; d < dedupeRenames.length; d++) {
           report.renamedLayers.push(comp.name + ": " + dedupeRenames[d]);
@@ -2421,15 +2510,29 @@
           );
         }
 
-        // 排他レイヤーがないグループには制御レイヤーを作らない
-        if (group.exclusiveLayers.length === 0) continue;
+        // 排他も任意指定もないグループには制御レイヤーを作らない
+        if (
+          group.exclusiveLayers.length === 0 &&
+          group.optionalLayers.length === 0
+        ) {
+          continue;
+        }
         report.groupCount++;
 
         createCtrlLayer(ctrlComp, comp.name);
 
-        var layersToRegister = [];
+        // 排他（*）＋任意指定（無印）を同じ式で登録
+        var toRegister = [];
         for (var r = 0; r < group.exclusiveLayers.length; r++) {
-          var layer = group.exclusiveLayers[r].layer;
+          toRegister.push(group.exclusiveLayers[r].layer);
+        }
+        for (var o = 0; o < group.optionalLayers.length; o++) {
+          toRegister.push(group.optionalLayers[o].layer);
+        }
+
+        var layersToRegister = [];
+        for (var t = 0; t < toRegister.length; t++) {
+          var layer = toRegister[t];
           if (
             hasOpacitySignature(layer, LAB_MAP_SIGNATURE) ||
             hasOpacitySignature(layer, BLINK_SIGNATURE)
@@ -2449,16 +2552,27 @@
           "EmoLabMaker: PSDセットアップ登録",
         );
 
-        // デフォルト表情マーカー（初回のみ）
+        // 既定の表示中集合マーカー（初回・マーカー皆無時のみ）
+        // = 既定ラジオ（表示状態の排他）＋ 表示状態の任意指定（完全名）
         var ctrlLayer = findCtrlLayerInComp(ctrlComp, comp.name, 0);
         var hasMarkers = false;
         try {
           hasMarkers = ctrlLayer.property("Marker").numKeys > 0;
         } catch (err2) {}
         if (ctrlLayer && !hasMarkers) {
-          var defaultLayer =
-            group.defaultLayer || group.exclusiveLayers[0].layer;
-          writeMarkerNameAtTime(ctrlComp, comp.name, 0, defaultLayer.name);
+          var defaultNames = [];
+          var defLayer =
+            group.defaultLayer ||
+            (group.exclusiveLayers.length > 0
+              ? group.exclusiveLayers[0].layer
+              : null);
+          if (defLayer) defaultNames.push(defLayer.name);
+          for (var oo = 0; oo < group.optionalLayers.length; oo++) {
+            if (group.optionalLayers[oo].layer.enabled) {
+              defaultNames.push(group.optionalLayers[oo].layer.name);
+            }
+          }
+          writeMarkerNameAtTime(ctrlComp, comp.name, 0, defaultNames.join(","));
           report.markersWritten++;
         }
       }
@@ -2503,6 +2617,8 @@
         group.comp.name +
         "（排他 " +
         group.exclusiveLayers.length +
+        " / 任意 " +
+        group.optionalLayers.length +
         " / 強制 " +
         group.forcedLayers.length +
         (defaultLayer
@@ -2510,8 +2626,9 @@
           : "") +
         "）";
       var cb = listGroup.add("checkbox", undefined, label);
-      // 排他レイヤーのあるグループのみ既定で ON（強制表示のみのグループも選択は可能）
-      cb.value = group.exclusiveLayers.length > 0;
+      // 排他または任意指定があるグループを既定で ON（強制のみのグループも選択は可能）
+      cb.value =
+        group.exclusiveLayers.length > 0 || group.optionalLayers.length > 0;
       checkboxes.push(cb);
     }
 
@@ -2713,12 +2830,20 @@
       lines = lines.concat([
         "var ctrlLayer = findCtrlLayer();",
         "var markerName = getCurrentMarkerName(ctrlLayer);",
-        'var blinkEnabled = markerName !== null && openNames.indexOf("," + markerName + ",") >= 0;',
+        // markerName は表示中集合。開き目名のいずれかが集合に含まれていれば瞬きを有効化(積集合判定)
+        "var blinkEnabled = false;",
+        "if (markerName !== null) {",
+        '  var ms = ("," + markerName + ",");',
+        '  var on = openNames.split(",");',
+        "  for (var bi = 0; bi < on.length; bi++) {",
+        '    if (on[bi] !== "" && ms.indexOf("," + on[bi] + ",") >= 0) { blinkEnabled = true; break; }',
+        "  }",
+        "}",
         "var result;",
         "if (blinkEnabled && phase > 0) {",
         "  result = blinkVisible() ? 100 : 0;",
         "} else {",
-        "  result = markerName !== null && thisLayer.name === markerName ? 100 : 0;",
+        '  result = markerName !== null && ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
         "}",
         "result;",
       ]);
@@ -3060,10 +3185,493 @@
       report.updated;
   };
 
+  // ════════════════════════════════════════════════════════════════
+  //
+  //  TAB 4 : 立ち絵 (統合パネル・階層表示)
+  //
+  // ════════════════════════════════════════════════════════════════
+  // 立ち絵ルートコンポを選ぶと、ネストをたどって階層ツリーを組み、
+  // 各階層の選択肢を表示する（ラジオ=ボタン / 任意=チェックボックス）。
+  // クリックで「表示中集合」マーカーを制御コンポの現在時刻に書き込む。
+
+  // ── 文字列ヘルパー（純粋・テスト可能） ──────────────────────────
+  function detectCommonPrefix(names) {
+    if (!names || names.length < 2) return "";
+    var prefix = names[0];
+    for (var i = 1; i < names.length; i++) {
+      var n = names[i];
+      var j = 0;
+      while (j < prefix.length && j < n.length && prefix.charAt(j) === n.charAt(j)) {
+        j++;
+      }
+      prefix = prefix.substring(0, j);
+      if (prefix === "") break;
+    }
+    var us = prefix.lastIndexOf("_");
+    return us >= 0 ? prefix.substring(0, us + 1) : "";
+  }
+
+  function shortenGroupName(name, prefix) {
+    if (prefix && name.indexOf(prefix) === 0) return name.substring(prefix.length);
+    var us = name.indexOf("_");
+    return us >= 0 ? name.substring(us + 1) : name;
+  }
+
+  // ── 階層ツリー構築 ──────────────────────────────────────────────
+  // 各 comp を DFS で走査し、深さ付きノード列を返す。
+  //   choice 分類: * = ラジオ / ! = 強制(常時表示) / 無印リーフ = 任意指定
+  //   (無印フォルダはコンテナ扱いで選択肢にしない)
+  function buildStageNodes(rootComp) {
+    var visited = {};
+    if (!rootComp) return [];
+
+    function walk(comp, depth, isRoot) {
+      if (!comp || visited[comp.id]) return [];
+      visited[comp.id] = true;
+
+      var radio = [];
+      var optional = [];
+      var forced = [];
+      var nodeCtrlName = null;
+      var children = [];
+      var childDepth = isRoot ? depth : depth + 1;
+
+      for (var i = 1; i <= comp.numLayers; i++) {
+        var layer = comp.layer(i);
+        var parsed = parsePsdLayerName(layer.name);
+
+        var src = null;
+        try {
+          src = layer.source;
+        } catch (e) {}
+        var isFolder = !!(src && src instanceof CompItem);
+
+        if (parsed.flipx || parsed.flipy) {
+          // flip バリエーションは選択肢にしない
+        } else if (parsed.exclusive) {
+          radio.push({ fullName: layer.name, label: parsed.base });
+        } else if (parsed.forced) {
+          forced.push({ fullName: layer.name, label: parsed.base });
+        } else if (!isFolder) {
+          optional.push({ fullName: layer.name, label: parsed.base });
+        }
+
+        if (!nodeCtrlName) {
+          var ctx = parseEmoContext(layer);
+          if (ctx) nodeCtrlName = ctx.ctrlCompName;
+        }
+
+        if (isFolder) {
+          children = children.concat(walk(src, childDepth, false));
+        }
+      }
+
+      var hasOwn = radio.length > 0 || optional.length > 0 || forced.length > 0;
+      var out = [];
+      var emit = isRoot ? hasOwn : hasOwn || children.length > 0;
+      if (emit) {
+        out.push({
+          comp: comp,
+          depth: depth,
+          displayName: comp.name,
+          radioChoices: radio,
+          optionalChoices: optional,
+          forcedChoices: forced,
+          ctrlCompName: nodeCtrlName,
+          ctrlComp: null,
+          visibleSet: [],
+          hasChildren: isRoot ? false : children.length > 0,
+        });
+      }
+      return out.concat(children);
+    }
+
+    return walk(rootComp, 0, true);
+  }
+
+  // ── UI 構築 ──────────────────────────────────────────────────────
+  var stageTopRow = tabStage.add("group");
+  stageTopRow.orientation = "row";
+  stageTopRow.alignment = ["fill", "top"];
+  stageTopRow.alignChildren = ["left", "center"];
+  stageTopRow.spacing = 4;
+
+  stageTopRow.add("statictext", undefined, "立ち絵");
+  var stageCtrlInfo = stageTopRow.add("statictext", undefined, "");
+  stageCtrlInfo.preferredSize = [16, BUTTON_HEIGHT];
+  setCheckState(stageCtrlInfo, false);
+
+  var stageRootDropdown = stageTopRow.add("dropdownlist", undefined, []);
+  stageRootDropdown.alignment = ["fill", "center"];
+  stageRootDropdown.minimumSize = [DROPDOWN_MIN_W, BUTTON_HEIGHT];
+  stageRootDropdown.preferredSize.height = BUTTON_HEIGHT;
+  stageRootDropdown.helpTip = "立ち絵のルートコンポ（PSDタブで読み込んだコンポ）";
+
+  var stageRefreshBtn = stageTopRow.add("button", undefined, "更新");
+  stageRefreshBtn.preferredSize = [52, BUTTON_HEIGHT];
+  stageRefreshBtn.helpTip = "コンポ一覧・階層・現在状態を再取得（再生ヘッド移動後に押す）";
+
+  var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
+  stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
+
+  var stageGridPanel = tabStage.add("panel");
+  stageGridPanel.alignment = ["fill", "fill"];
+  stageGridPanel.margins = PANEL_MARGIN;
+
+  var stageGrid = stageGridPanel.add("group");
+  stageGrid.orientation = "column";
+  stageGrid.alignChildren = ["fill", "top"];
+  stageGrid.alignment = ["fill", "fill"];
+  stageGrid.spacing = GRID_SPACING;
+
+  var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
+  stageSetPanel.orientation = "row";
+  stageSetPanel.alignment = ["fill", "top"];
+  stageSetPanel.alignChildren = ["left", "center"];
+  stageSetPanel.spacing = 4;
+  stageSetPanel.margins = PANEL_MARGIN;
+
+  var stageSetDropdown = stageSetPanel.add("dropdownlist", undefined, []);
+  stageSetDropdown.alignment = ["fill", "center"];
+  stageSetDropdown.minimumSize = [100, BUTTON_HEIGHT];
+  stageSetDropdown.preferredSize.height = BUTTON_HEIGHT;
+
+  var stageSetApplyBtn = stageSetPanel.add("button", undefined, "適用");
+  stageSetApplyBtn.preferredSize = [48, BUTTON_HEIGHT];
+  var stageSetSaveBtn = stageSetPanel.add("button", undefined, "保存");
+  stageSetSaveBtn.preferredSize = [48, BUTTON_HEIGHT];
+  var stageSetDeleteBtn = stageSetPanel.add("button", undefined, "削除");
+  stageSetDeleteBtn.preferredSize = [48, BUTTON_HEIGHT];
+
+  var stageStatusText = tabStage.add(
+    "statictext",
+    undefined,
+    "立ち絵ルートコンポを選択してください。",
+  );
+  stageStatusText.alignment = ["fill", "bottom"];
+
+  // ── 状態 ──
+  var stageNodes = [];
+  var stageCollapsed = {};
+  var stageCtrlComp = null;
+  var isRebuildingStage = false;
+
+  function setStageStatus(text) {
+    stageStatusText.text = text;
+  }
+
+  function rebuildStageEmoSetDropdown(selectedName) {
+    var names = stageCtrlComp ? collectEmoSetNames(stageCtrlComp) : [];
+    stageSetDropdown.removeAll();
+    for (var i = 0; i < names.length; i++) {
+      stageSetDropdown.add("item", names[i]);
+    }
+    if (stageSetDropdown.items.length === 0) return;
+    for (var j = 0; j < stageSetDropdown.items.length; j++) {
+      if (stageSetDropdown.items[j].text === selectedName) {
+        stageSetDropdown.selection = j;
+        return;
+      }
+    }
+    stageSetDropdown.selection = 0;
+  }
+
+  function rebuildStageTree() {
+    if (isRebuildingStage) return;
+    isRebuildingStage = true;
+    try {
+      for (var d = stageGrid.children.length - 1; d >= 0; d--) {
+        stageGrid.remove(stageGrid.children[d]);
+      }
+
+      if (stageNodes.length === 0) {
+        var empty = stageGrid.add(
+          "statictext",
+          undefined,
+          "階層が見つかりません。PSDタブでセットアップしたコンポをルートに選んでください。",
+        );
+        empty.alignment = ["fill", "top"];
+        stageGrid.layout.layout(true);
+        stageGridPanel.layout.layout(true);
+        return;
+      }
+
+      var collapseDepth = -1;
+      for (var n = 0; n < stageNodes.length; n++) {
+        var node = stageNodes[n];
+
+        if (collapseDepth >= 0) {
+          if (node.depth > collapseDepth) continue;
+          collapseDepth = -1;
+        }
+
+        var row = stageGrid.add("group");
+        row.orientation = "row";
+        row.alignment = ["fill", "top"];
+        row.alignChildren = ["left", "center"];
+        row.spacing = 4;
+
+        var indent = node.depth * 14;
+        if (indent > 0) {
+          var sp = row.add("group");
+          sp.preferredSize = [indent, 1];
+        }
+
+        var isCollapsed = !!stageCollapsed[node.comp.id];
+        if (node.hasChildren) {
+          var tg = row.add("button", undefined, isCollapsed ? "▸" : "∇");
+          tg.preferredSize = [22, BUTTON_HEIGHT];
+          tg.onClick = (function (id) {
+            return function () {
+              stageCollapsed[id] = !stageCollapsed[id];
+              rebuildStageTree();
+            };
+          })(node.comp.id);
+        } else {
+          var sp2 = row.add("group");
+          sp2.preferredSize = [22, 1];
+        }
+
+        var lbl = row.add("statictext", undefined, node.displayName);
+        lbl.preferredSize = [LABEL_WIDTH + 20, BUTTON_HEIGHT];
+        lbl.helpTip = node.comp.name;
+
+        var rr;
+        for (rr = 0; rr < node.radioChoices.length; rr++) {
+          (function (nd, ch) {
+            var on = indexOfName(nd.visibleSet, ch.fullName) >= 0;
+            var btn = row.add(
+              "button",
+              undefined,
+              on ? "✔ " + ch.label : ch.label,
+            );
+            btn.helpTip = ch.fullName;
+            btn.onClick = function () {
+              if (!nd.ctrlComp) {
+                setStageStatus("制御コンポが見つかりません。");
+                return;
+              }
+              var radioNames = [];
+              for (var k = 0; k < nd.radioChoices.length; k++) {
+                radioNames.push(nd.radioChoices[k].fullName);
+              }
+              setRadioSelection(
+                nd.ctrlComp,
+                nd.comp.name,
+                nd.ctrlComp.time,
+                ch.fullName,
+                radioNames,
+              );
+              setStageStatus(nd.displayName + ": " + ch.label);
+              refreshStage(false);
+            };
+          })(node, node.radioChoices[rr]);
+        }
+
+        for (rr = 0; rr < node.optionalChoices.length; rr++) {
+          (function (nd, ch) {
+            var on = indexOfName(nd.visibleSet, ch.fullName) >= 0;
+            var cbx = row.add("checkbox", undefined, ch.label);
+            cbx.value = on;
+            cbx.helpTip = ch.fullName;
+            cbx.onClick = function () {
+              if (!nd.ctrlComp) {
+                setStageStatus("制御コンポが見つかりません。");
+                return;
+              }
+              toggleLayerInSet(
+                nd.ctrlComp,
+                nd.comp.name,
+                nd.ctrlComp.time,
+                ch.fullName,
+              );
+              setStageStatus(
+                nd.displayName + ": " + ch.label + (cbx.value ? " ON" : " OFF"),
+              );
+              refreshStage(false);
+            };
+          })(node, node.optionalChoices[rr]);
+        }
+
+        for (rr = 0; rr < node.forcedChoices.length; rr++) {
+          var fcb = row.add("checkbox", undefined, node.forcedChoices[rr].label);
+          fcb.value = true;
+          fcb.enabled = false;
+          fcb.helpTip = "常に表示 (!)";
+        }
+
+        if (node.hasChildren && isCollapsed) collapseDepth = node.depth;
+      }
+
+      stageGrid.layout.layout(true);
+      stageGridPanel.layout.layout(true);
+    } finally {
+      isRebuildingStage = false;
+    }
+  }
+
+  function refreshStage(rebuildDropdownToo) {
+    if (rebuildDropdownToo) {
+      var cur = stageRootDropdown.selection
+        ? stageRootDropdown.selection.text
+        : null;
+      rebuildDropdown(stageRootDropdown, cur);
+    }
+
+    var rootComp = getSelectedComp(stageRootDropdown);
+    stageNodes = buildStageNodes(rootComp);
+
+    // 制御コンポ導出（最初に見つかったもの、なければルート）
+    stageCtrlComp = null;
+    var i;
+    for (i = 0; i < stageNodes.length; i++) {
+      if (stageNodes[i].ctrlCompName) {
+        var c = findCompByName(stageNodes[i].ctrlCompName);
+        if (c) {
+          stageCtrlComp = c;
+          break;
+        }
+      }
+    }
+    if (!stageCtrlComp) stageCtrlComp = rootComp;
+
+    // displayName / ctrlComp / visibleSet を解決
+    var names = [];
+    for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
+    var prefix = detectCommonPrefix(names);
+    for (i = 0; i < stageNodes.length; i++) {
+      var nd = stageNodes[i];
+      nd.displayName = shortenGroupName(nd.comp.name, prefix);
+      nd.ctrlComp =
+        (nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null) ||
+        stageCtrlComp;
+      nd.visibleSet = nd.ctrlComp
+        ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
+        : [];
+    }
+
+    setCheckState(stageCtrlInfo, stageNodes.length > 0);
+    rebuildStageTree();
+    rebuildStageEmoSetDropdown(
+      stageSetDropdown.selection ? stageSetDropdown.selection.text : null,
+    );
+
+    if (!rootComp) setStageStatus("立ち絵ルートコンポを選択してください。");
+  }
+
+  function showStageHelpDialog() {
+    var dlg = new Window("dialog", "立ち絵タブの使い方");
+    dlg.orientation = "column";
+    dlg.alignChildren = ["fill", "top"];
+    dlg.margins = 16;
+    dlg.spacing = 6;
+    var lines = [
+      "【立ち絵タブ】PSDToolKit 立ち絵の階層をまとめて切り替えます。",
+      "1. PSDタブでセットアップ済みの立ち絵ルートコンポを選ぶ",
+      "2. 目/口/服などの階層がインデントで並びます",
+      "   - ラジオ（* レイヤー）= ボタン（1つだけ表示）",
+      "   - 任意指定（無印レイヤー）= チェックボックス（独立 ON/OFF）",
+      "   - 常時表示（! レイヤー）= チェック済み・固定",
+      "3. ∇ / ▸ でサブ階層を折りたためます",
+      "4. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
+      "",
+      "再生ヘッドを動かした後は「更新」で現在状態を取り直してください",
+      "（ScriptUI は再生ヘッド移動を検知できないため手動更新です）。",
+      "",
+      "「表情セット」で全階層の表示状態をまとめて保存/適用できます。",
+    ];
+    for (var i = 0; i < lines.length; i++) {
+      dlg.add("statictext", undefined, lines[i]);
+    }
+    dlg.add("button", undefined, "閉じる", { name: "ok" });
+    dlg.show();
+  }
+
+  stageRefreshBtn.onClick = function () {
+    refreshStage(true);
+    setStageStatus("一覧を更新しました。");
+  };
+
+  stageHelpBtn.onClick = function () {
+    showStageHelpDialog();
+  };
+
+  stageRootDropdown.onChange = function () {
+    refreshStage(false);
+  };
+
+  stageSetSaveBtn.onClick = function () {
+    if (!stageCtrlComp) {
+      setStageStatus("立ち絵ルートを選択してください。");
+      return;
+    }
+    var entries = captureEmoSet(stageCtrlComp);
+    if (entries.length === 0) {
+      alert("保存できる状態がありません。先に表情を切り替えてください。");
+      return;
+    }
+    var defaultName = stageSetDropdown.selection
+      ? stageSetDropdown.selection.text
+      : "セット1";
+    var setName = promptForSetName(defaultName);
+    if (!setName) return;
+    saveEmoSet(stageCtrlComp, setName, entries);
+    rebuildStageEmoSetDropdown(setName);
+    setStageStatus(
+      "表情セット「" + setName + "」を保存しました（" + entries.length + " グループ）。",
+    );
+  };
+
+  stageSetApplyBtn.onClick = function () {
+    if (!stageCtrlComp || !stageSetDropdown.selection) {
+      setStageStatus("適用する表情セットを選択してください。");
+      return;
+    }
+    var setName = stageSetDropdown.selection.text;
+    var result = applyEmoSet(stageCtrlComp, setName);
+    if (!result) {
+      setStageStatus("表情セットが見つかりません: " + setName);
+      rebuildStageEmoSetDropdown(null);
+      return;
+    }
+    refreshStage(false);
+    setStageStatus(
+      "表情セット「" + setName + "」を適用しました（" + result.applied + " グループ）。",
+    );
+  };
+
+  stageSetDeleteBtn.onClick = function () {
+    if (!stageCtrlComp || !stageSetDropdown.selection) {
+      setStageStatus("削除する表情セットを選択してください。");
+      return;
+    }
+    var setName = stageSetDropdown.selection.text;
+    var layer = findEmoSetLayer(stageCtrlComp, setName);
+    if (!layer) {
+      rebuildStageEmoSetDropdown(null);
+      return;
+    }
+    if (!confirm("表情セット「" + setName + "」を削除しますか？")) return;
+    app.beginUndoGroup("emo2layer: 表情セット削除");
+    try {
+      layer.remove();
+    } finally {
+      app.endUndoGroup();
+    }
+    rebuildStageEmoSetDropdown(null);
+    setStageStatus("表情セット「" + setName + "」を削除しました。");
+  };
+
   // リサイズ対応
   win.onResizing = win.onResize = function () {
     this.layout.resize();
     if (tabs.selection === tabSelector) resizeGrid();
+    else if (tabs.selection === tabStage) rebuildStageTree();
+  };
+
+  // タブ切替時、立ち絵タブを開いたら最新化
+  tabs.onChange = function () {
+    if (tabs.selection === tabStage) refreshStage(true);
   };
 
   // ════════════════════════════════════════════════════════════════
@@ -3077,7 +3685,9 @@
     rebuildDropdown(ctrlRow.dropdown, name);
     rebuildDropdown(psdRootRow.dropdown, name);
     rebuildDropdown(psdCtrlRow.dropdown, name);
+    rebuildDropdown(stageRootDropdown, name);
     rebuildList();
+    refreshStage(false);
   })();
 
   if (win instanceof Window) {
