@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.0
+ * @version 1.9.1
  * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -44,6 +44,25 @@
       if (comps[i].name === name) return comps[i];
     }
     return null;
+  }
+
+  // ── 取り消しグループ（ネスト対策） ───────────────────────────────
+  // beginUndo/endUndo はネストしても最外だけが実際の AE undo group を作る。
+  // これにより 1 ユーザー操作 = 1 取り消し単位 になり、Ctrl+Z の不整合を防ぐ。
+  var __undoDepth = 0;
+  function beginUndo(name) {
+    if (__undoDepth <= 0) {
+      __undoDepth = 0;
+      app.beginUndoGroup(name);
+    }
+    __undoDepth++;
+  }
+  function endUndo() {
+    __undoDepth--;
+    if (__undoDepth <= 0) {
+      __undoDepth = 0;
+      app.endUndoGroup();
+    }
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -253,7 +272,7 @@
     var expression = buildOpacityExpression(ctrlCompName, targetComp.name);
     var count = 0;
 
-    app.beginUndoGroup(undoName || "emo2layer: Register");
+    beginUndo(undoName || "emo2layer: Register");
     try {
       for (var i = 0; i < layers.length; i++) {
         var layer = layers[i];
@@ -263,7 +282,7 @@
         count++;
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     return count;
   }
@@ -277,7 +296,7 @@
     if (!selected || selected.length === 0) return 0;
 
     var count = 0;
-    app.beginUndoGroup("emo2layer: Unregister");
+    beginUndo("emo2layer: Unregister");
     try {
       for (var i = 0; i < selected.length; i++) {
         var layer = selected[i];
@@ -287,7 +306,7 @@
         count++;
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     return count;
   }
@@ -376,14 +395,14 @@
     var ctrlLayer = findCtrlLayerInComp(ctrlComp, targetCompName, time);
     if (!ctrlLayer) return false;
 
-    app.beginUndoGroup("emo2layer: Write Marker");
+    beginUndo("emo2layer: Write Marker");
     try {
       removeMarkerAtTime(ctrlLayer, time);
       ctrlLayer
         .property("Marker")
         .setValueAtTime(time, new MarkerValue(markerName));
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     return true;
   }
@@ -533,7 +552,7 @@
       lines.push(entries[i].target + "=" + entries[i].marker);
     }
 
-    app.beginUndoGroup("emo2layer: 表情セット保存");
+    beginUndo("emo2layer: 表情セット保存");
     try {
       var layer = findEmoSetLayer(ctrlComp, setName);
       if (!layer) {
@@ -550,7 +569,7 @@
       }
       layer.comment = lines.join("\n");
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
   }
 
@@ -563,7 +582,7 @@
     var applied = 0;
     var missing = 0;
 
-    app.beginUndoGroup("emo2layer: 表情セット適用");
+    beginUndo("emo2layer: 表情セット適用");
     try {
       for (var i = 0; i < entries.length; i++) {
         var ok = writeMarkerNameAtTime(
@@ -576,7 +595,7 @@
         else missing++;
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     return { applied: applied, missing: missing };
   }
@@ -1219,11 +1238,11 @@
     }
     if (!confirm("表情セット「" + setName + "」を削除しますか？")) return;
 
-    app.beginUndoGroup("emo2layer: 表情セット削除");
+    beginUndo("emo2layer: 表情セット削除");
     try {
       layer.remove();
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     rebuildEmoSetDropdown(null);
     setStatus("表情セット「" + setName + "」を削除しました。");
@@ -1877,11 +1896,11 @@
     }
 
     var result;
-    app.beginUndoGroup("lab2layer: 口形状マッピング適用");
+    beginUndo("lab2layer: 口形状マッピング適用");
     try {
       result = applyMappingToLayers(items, phonemeCompName, allCsv);
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     var appliedCount = result.applied;
     var emoLinkedCount = result.emoLinked;
@@ -1913,7 +1932,7 @@
     var removedCount = 0;
     var restoredCount = 0;
 
-    app.beginUndoGroup("lab2layer: 口形状マッピング解除");
+    beginUndo("lab2layer: 口形状マッピング解除");
     try {
       var layers = comp.selectedLayers;
       for (var i = 0; i < layers.length; i++) {
@@ -1941,7 +1960,7 @@
         removedCount++;
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
 
     var message = removedCount + " レイヤーのマッピングを解除しました。";
@@ -1990,7 +2009,7 @@
     }
     var offsetSec = frames * frameSec;
 
-    app.beginUndoGroup("lab2layer: Adjust Markers");
+    beginUndo("lab2layer: Adjust Markers");
 
     var totalAdjusted = 0;
     for (var i = 0; i < layers.length; i++) {
@@ -2022,7 +2041,7 @@
       totalAdjusted += numMarkers;
     }
 
-    app.endUndoGroup();
+    endUndo();
   }
 
   // フレーム調整ボタン
@@ -2184,7 +2203,7 @@
       }
     }
 
-    app.beginUndoGroup("lab2layer: Create Phoneme Layer");
+    beginUndo("lab2layer: Create Phoneme Layer");
 
     // 音声レイヤーがなければヌルレイヤーを作成
     if (!targetLayer) {
@@ -2209,7 +2228,7 @@
     // 既存マーカーを削除して配置（共通関数）
     writeLabMarkers(targetLayer, attachTime, labStartTime, selectedPhonemes, offsetSec);
 
-    app.endUndoGroup();
+    endUndo();
 
     var message =
       "音素マーカーを追加: " +
@@ -2240,7 +2259,7 @@
     var targetCompName = promptForPhonemeComp(comp.name);
     if (!targetCompName) return;
 
-    app.beginUndoGroup("lab2layer: Setup Phoneme Opacity");
+    beginUndo("lab2layer: Setup Phoneme Opacity");
 
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i];
@@ -2254,7 +2273,7 @@
       layer.enabled = true;
     }
 
-    app.endUndoGroup();
+    endUndo();
     alert(
       "完了: " +
         layers.length +
@@ -2279,7 +2298,7 @@
 
     var totalDeleted = 0;
 
-    app.beginUndoGroup("lab2layer: Delete Markers");
+    beginUndo("lab2layer: Delete Markers");
 
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i];
@@ -2298,7 +2317,7 @@
       }
     }
 
-    app.endUndoGroup();
+    endUndo();
 
     if (totalDeleted > 0) {
       alert(
@@ -2504,7 +2523,7 @@
       flipSkipped: [],
     };
 
-    app.beginUndoGroup("EmoLabMaker: PSDセットアップ");
+    beginUndo("EmoLabMaker: PSDセットアップ");
     try {
       for (var g = 0; g < groups.length; g++) {
         var group = groups[g];
@@ -2605,7 +2624,7 @@
         }
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     return report;
   }
@@ -2868,10 +2887,13 @@
         "  }",
         "}",
         "var result;",
-        "if (blinkEnabled && phase > 0) {",
+        "if (markerName === null) {",
+        // マーカー未設定でも目が消えないよう、単独でまばたきさせる
+        '  result = phase > 0 ? (blinkVisible() ? 100 : 0) : (role === "open" ? 100 : 0);',
+        "} else if (blinkEnabled && phase > 0) {",
         "  result = blinkVisible() ? 100 : 0;",
         "} else {",
-        '  result = markerName !== null && ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
+        '  result = ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
         "}",
         "result;",
       ]);
@@ -3030,7 +3052,7 @@
     var emoLinkedCount = 0;
     var skippedCount = 0;
 
-    app.beginUndoGroup("EmoLabMaker: 目パチ設定");
+    beginUndo("EmoLabMaker: 目パチ設定");
     try {
       for (var r = 0; r < blinkRows.length; r++) {
         var rowData = blinkRows[r];
@@ -3059,7 +3081,7 @@
         }
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
 
     var message = "完了: " + appliedCount + " レイヤーに目パチを設定しました。";
@@ -3088,7 +3110,7 @@
     var removedCount = 0;
     var restoredCount = 0;
 
-    app.beginUndoGroup("EmoLabMaker: 目パチ解除");
+    beginUndo("EmoLabMaker: 目パチ解除");
     try {
       var layers = comp.selectedLayers;
       for (var i = 0; i < layers.length; i++) {
@@ -3109,7 +3131,7 @@
         removedCount++;
       }
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
 
     var message = removedCount + " レイヤーの目パチを解除しました。";
@@ -3239,10 +3261,13 @@
     return us >= 0 ? prefix.substring(0, us + 1) : "";
   }
 
+  // prefix で始まる場合のみ剥がす。最初の "_" 以降に短縮するような
+  // 推測はしない（"zunda_s" → "s" のような誤短縮を防ぐ）。
   function shortenGroupName(name, prefix) {
-    if (prefix && name.indexOf(prefix) === 0) return name.substring(prefix.length);
-    var us = name.indexOf("_");
-    return us >= 0 ? name.substring(us + 1) : name;
+    if (prefix && name.length > prefix.length && name.indexOf(prefix) === 0) {
+      return name.substring(prefix.length);
+    }
+    return name;
   }
 
   // ── 階層ツリー構築 ──────────────────────────────────────────────
@@ -3275,6 +3300,12 @@
       for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
         if (isSystemLayerName(layer.name)) continue;
+        // ヌルレイヤーは表示物ではないので選択肢にしない（「ヌル」表示の除去）
+        var isNull = false;
+        try {
+          isNull = layer.nullLayer === true;
+        } catch (eNull) {}
+        if (isNull) continue;
 
         var parsed = parsePsdLayerName(layer.name);
 
@@ -3534,12 +3565,16 @@
         }
 
         var choiceIndent = indent + 26;
-        var avail = availBase - choiceIndent;
+        // 折り返し幅は控えめに見積もる（はみ出し防止のため安全マージンを引く）
+        var avail = availBase - choiceIndent - 24;
         if (avail < 80) avail = 80;
         var curRow = null;
         var curW = 0;
         for (var ci = 0; ci < items.length; ci++) {
-          var est = items[ci].ch.label.length * 14 + 28;
+          // ボタン幅の概算: 日本語1文字を広めに見積もる + 余白（チェックボックスはさらに広い）
+          var est =
+            items[ci].ch.label.length * 18 +
+            (items[ci].kind === "radio" ? 34 : 46);
           if (curRow === null || (curW + est > avail && curW > 0)) {
             curRow = block.add("group");
             curRow.orientation = "row";
@@ -3638,10 +3673,14 @@
 
   function refreshStage(rebuildDropdownToo) {
     if (rebuildDropdownToo) {
+      // カレントで開いているコンポが設定済みなら、それを優先選択（現在の立ち絵に追従）。
+      // そうでなければ現在の選択を維持。
       var cur = stageRootDropdown.selection
         ? stageRootDropdown.selection.text
         : null;
-      rebuildStageRootDropdown(cur);
+      var ac = getActiveComp();
+      var prefer = ac && hasCtrlPrefixedLayer(ac) ? ac.name : cur;
+      rebuildStageRootDropdown(prefer);
     }
 
     var rootComp = getSelectedComp(stageRootDropdown);
@@ -3661,10 +3700,12 @@
     }
     if (!stageCtrlComp) stageCtrlComp = rootComp;
 
-    // displayName（共通prefix除去 + */! 除去）/ ctrlComp / visibleSet を解決
+    // displayName（ルート名prefix除去 + */! 除去）/ ctrlComp / visibleSet を解決
+    // セットアップは各グループを "<ルート名>_<グループ名>" に一意化するため、
+    // ルート名prefix を剥がせばよい（共通prefix推測より安全）。
     var names = [];
     for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
-    var prefix = detectCommonPrefix(names);
+    var prefix = rootComp ? rootComp.name + "_" : detectCommonPrefix(names);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
       nd.displayName = parsePsdLayerName(
@@ -3784,11 +3825,11 @@
       return;
     }
     if (!confirm("表情セット「" + setName + "」を削除しますか？")) return;
-    app.beginUndoGroup("emo2layer: 表情セット削除");
+    beginUndo("emo2layer: 表情セット削除");
     try {
       layer.remove();
     } finally {
-      app.endUndoGroup();
+      endUndo();
     }
     rebuildStageEmoSetDropdown(null);
     setStageStatus("表情セット「" + setName + "」を削除しました。");
@@ -3806,13 +3847,9 @@
     if (tabs.selection === tabStage) refreshStage(true);
   };
 
-  // ウィンドウ/パネルがアクティブになったら立ち絵タブを自動更新
-  // （タイムラインで再生ヘッド移動 → パネルをクリックで戻る、を吸収。手動「更新」依存を軽減）
-  win.onActivate = function () {
-    try {
-      if (tabs.selection === tabStage) refreshStage(false);
-    } catch (e) {}
-  };
+  // 注: ウィンドウのアクティブ化で自動更新すると、クリックした瞬間に再描画されて
+  // ボタンが作り直され「2回クリックしないと反映されない」不具合になるため行わない。
+  // 再生ヘッド移動後は「更新」ボタンで取り直す（クリック操作自体は1回で反映される）。
 
   // ════════════════════════════════════════════════════════════════
   // 初期化
