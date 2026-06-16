@@ -1,10 +1,10 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.8.0
+ * @version 1.9.0
  * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
- *                 口階層の「口」ボタンで lab 口パクをワンクリック割当
+ *                 * / ! はコンポにも適用。上位未選択の階層はグレーアウト。選択肢は幅で折り返す
  *   Tab "口パク" : labファイルを解析して音素レイヤーを生成 + 口形状マッピング (PSDToolKit互換)
  *   Tab "PSD"    : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ + 目パチ
  *   Tab "詳細"   : 指定レイヤーを登録し、任意の場所のマーカーで表示を切り替える低レベル編集 + 表情セット
@@ -1358,24 +1358,6 @@
     return entries;
   }
 
-  /** 音素エントリ(音素別 times)を全出現にフラット化し、開始時間順にソート */
-  function flattenLabEntries(entries) {
-    var out = [];
-    for (var i = 0; i < entries.length; i++) {
-      for (var j = 0; j < entries[i].times.length; j++) {
-        out.push({
-          startTime: entries[i].times[j].start,
-          endTime: entries[i].times[j].end,
-          phoneme: entries[i].phoneme,
-        });
-      }
-    }
-    out.sort(function (a, b) {
-      return a.startTime - b.startTime;
-    });
-    return out;
-  }
-
   /**
    * targetLayer に音素マーカーを配置する（既存マーカーは全削除してから）。
    * selectedPhonemes は {startTime,endTime,phoneme} の配列（開始時間順）。
@@ -1392,22 +1374,6 @@
         .property("Marker")
         .setValueAtTime(markerTime, new MarkerValue(selectedPhonemes[k].phoneme));
     }
-  }
-
-  /**
-   * comp に [Lab] ヌルレイヤーを新規作成し、全音素マーカーを配置する。
-   * 立ち絵タブの簡易 lab ローダ用。作成したレイヤーを返す（音素ゼロなら null）。
-   */
-  function placeLabIntoComp(comp, attachTime, entries, offsetSec, labName) {
-    var sel = flattenLabEntries(entries);
-    if (sel.length === 0) return null;
-    var labStart = sel[0].startTime;
-    var duration = sel[sel.length - 1].endTime - labStart;
-    var layer = comp.layers.addNull(duration);
-    layer.name = "[Lab] " + labName;
-    layer.startTime = attachTime;
-    writeLabMarkers(layer, attachTime, labStart, sel, offsetSec);
-    return layer;
   }
 
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
@@ -1694,32 +1660,6 @@
       }
     }
     return names.length > 0 ? names.join(", ") : "（未割当）";
-  }
-
-  /**
-   * 口形ラベル（base名: あ/い/う/え/お/ん/閉 など）から
-   * PSDToolKit 互換プリセット { csv, isClosedFallback } を返す。該当なしは null。
-   * 立ち絵タブの「口パク割当」で子レイヤーを自動マッピングするのに使う。
-   */
-  function mouthPresetForLabel(label) {
-    if (!label) return null;
-    // 厳格判定: 「笑い」など母音字を含むだけの非口レイヤーを誤検出しないため
-    // 閉じ口（「閉」を含む / ちょうど「ん」）
-    if (label.indexOf("閉") >= 0 || label === "ん") {
-      return { csv: MOUTH_SHAPES[5].preset, isClosedFallback: true, vowel: false };
-    }
-    // 母音はラベル完全一致のみ（あ/い/う/え/お）
-    var vowels = ["あ", "い", "う", "え", "お"];
-    for (var i = 0; i < vowels.length; i++) {
-      if (label === vowels[i]) {
-        return {
-          csv: MOUTH_SHAPES[i].preset,
-          isClosedFallback: false,
-          vowel: true,
-        };
-      }
-    }
-    return null;
   }
 
   /**
@@ -3307,25 +3247,35 @@
 
   // ── 階層ツリー構築 ──────────────────────────────────────────────
   // 各 comp を DFS で走査し、深さ付きノード列を返す。
-  //   choice 分類: * = ラジオ / ! = 強制(常時表示) / 無印リーフ = 任意指定
-  //   (無印フォルダはコンテナ扱いで選択肢にしない)
+  //   choice 分類(リーフ): * = ラジオ / 無印 = 任意指定 / ! = 出さない(常時表示で操作不要)
+  //   フォルダ参照: * のときだけ choice(サブ階層の排他切替)。!/無印 はコンテナのみ
+  //   [Emo]/[EmoSet]/[Lab] のシステムレイヤーは選択肢にしない
+  function isSystemLayerName(name) {
+    return (
+      name.indexOf(CTRL_PREFIX) === 0 ||
+      name.indexOf(SET_PREFIX) === 0 ||
+      name.indexOf("[Lab] ") === 0
+    );
+  }
+
   function buildStageNodes(rootComp) {
     var visited = {};
     if (!rootComp) return [];
 
-    function walk(comp, depth, isRoot) {
+    function walk(comp, depth, isRoot, refInfo) {
       if (!comp || visited[comp.id]) return [];
       visited[comp.id] = true;
 
       var radio = [];
       var optional = [];
-      var forced = [];
       var nodeCtrlName = null;
       var children = [];
       var childDepth = isRoot ? depth : depth + 1;
 
       for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
+        if (isSystemLayerName(layer.name)) continue;
+
         var parsed = parsePsdLayerName(layer.name);
 
         var src = null;
@@ -3337,10 +3287,10 @@
         if (parsed.flipx || parsed.flipy) {
           // flip バリエーションは選択肢にしない
         } else if (parsed.exclusive) {
+          // * はリーフでもフォルダでも radio choice（フォルダは下のサブ階層切替も兼ねる）
           radio.push({ fullName: layer.name, label: parsed.base, layer: layer });
-        } else if (parsed.forced) {
-          forced.push({ fullName: layer.name, label: parsed.base, layer: layer });
-        } else if (!isFolder) {
+        } else if (!isFolder && !parsed.forced) {
+          // 無印リーフ = 任意指定。! リーフ・無印/! フォルダは choice にしない
           optional.push({ fullName: layer.name, label: parsed.base, layer: layer });
         }
 
@@ -3350,11 +3300,17 @@
         }
 
         if (isFolder) {
-          children = children.concat(walk(src, childDepth, false));
+          children = children.concat(
+            walk(src, childDepth, false, {
+              name: layer.name,
+              exclusive: parsed.exclusive,
+              forced: parsed.forced,
+            }),
+          );
         }
       }
 
-      var hasOwn = radio.length > 0 || optional.length > 0 || forced.length > 0;
+      var hasOwn = radio.length > 0 || optional.length > 0;
       var out = [];
       var emit = isRoot ? hasOwn : hasOwn || children.length > 0;
       if (emit) {
@@ -3364,17 +3320,47 @@
           displayName: comp.name,
           radioChoices: radio,
           optionalChoices: optional,
-          forcedChoices: forced,
           ctrlCompName: nodeCtrlName,
           ctrlComp: null,
           visibleSet: [],
           hasChildren: isRoot ? false : children.length > 0,
+          active: true,
+          refName: refInfo ? refInfo.name : null,
+          refExclusive: refInfo ? refInfo.exclusive : false,
+          refForced: refInfo ? refInfo.forced : false,
         });
       }
       return out.concat(children);
     }
 
-    return walk(rootComp, 0, true);
+    return walk(rootComp, 0, true, null);
+  }
+
+  // active 伝播: 上位コンポ参照(*)が選択されていない階層は active=false。
+  // DFS順(親が子より前)前提で、depth-1 の直近ノードを親とみなす。
+  // 各ノードの visibleSet は事前に解決済みであること。
+  function computeStageActive(nodes) {
+    var lastAtDepth = {};
+    for (var i = 0; i < nodes.length; i++) {
+      var nn = nodes[i];
+      if (nn.depth === 0) {
+        nn.active = true;
+      } else {
+        var parent = lastAtDepth[nn.depth - 1];
+        var refVisible;
+        if (nn.refForced) {
+          refVisible = true;
+        } else if (nn.refExclusive) {
+          refVisible = parent
+            ? indexOfName(parent.visibleSet, nn.refName) >= 0
+            : true;
+        } else {
+          refVisible = true; // 無印フォルダ(コンテナ)は常に有効
+        }
+        nn.active = parent ? parent.active && refVisible : true;
+      }
+      lastAtDepth[nn.depth] = nn;
+    }
   }
 
   // ── UI 構築 ──────────────────────────────────────────────────────
@@ -3402,40 +3388,7 @@
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
-  var stageGridPanel = tabStage.add("panel");
-  stageGridPanel.alignment = ["fill", "fill"];
-  stageGridPanel.margins = PANEL_MARGIN;
-
-  var stageGrid = stageGridPanel.add("group");
-  stageGrid.orientation = "column";
-  stageGrid.alignChildren = ["fill", "top"];
-  stageGrid.alignment = ["fill", "fill"];
-  stageGrid.spacing = GRID_SPACING;
-
-  // 口パク lab ローダ（制御コンポに [Lab] を配置）
-  var stageLabPanel = tabStage.add("panel", undefined, "口パク (lab)");
-  stageLabPanel.orientation = "row";
-  stageLabPanel.alignment = ["fill", "top"];
-  stageLabPanel.alignChildren = ["left", "center"];
-  stageLabPanel.spacing = 4;
-  stageLabPanel.margins = PANEL_MARGIN;
-
-  stageLabPanel.add("statictext", undefined, "lab");
-  var stageLabPathText = stageLabPanel.add("edittext", undefined, "未選択");
-  stageLabPathText.alignment = ["fill", "center"];
-  stageLabPathText.enabled = false;
-  var stageLabBrowseBtn = stageLabPanel.add("button", undefined, "...");
-  stageLabBrowseBtn.preferredSize = [30, BUTTON_HEIGHT];
-  stageLabBrowseBtn.helpTip = "labファイルを選択";
-  stageLabPanel.add("statictext", undefined, "ofs");
-  var stageLabOffsetInput = stageLabPanel.add("edittext", undefined, "-67");
-  stageLabOffsetInput.preferredSize = [40, BUTTON_HEIGHT];
-  stageLabOffsetInput.helpTip = "オフセット(ms)。映像先行は負の値";
-  var stageLabPlaceBtn = stageLabPanel.add("button", undefined, "配置");
-  stageLabPlaceBtn.preferredSize = [48, BUTTON_HEIGHT];
-  stageLabPlaceBtn.helpTip =
-    "再生ヘッド位置に [Lab] を制御コンポへ配置。各口階層の「口」で割当";
-
+  // 表情セット（ツリーの上に配置）
   var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
   stageSetPanel.orientation = "row";
   stageSetPanel.alignment = ["fill", "top"];
@@ -3455,6 +3408,16 @@
   var stageSetDeleteBtn = stageSetPanel.add("button", undefined, "削除");
   stageSetDeleteBtn.preferredSize = [48, BUTTON_HEIGHT];
 
+  var stageGridPanel = tabStage.add("panel");
+  stageGridPanel.alignment = ["fill", "fill"];
+  stageGridPanel.margins = PANEL_MARGIN;
+
+  var stageGrid = stageGridPanel.add("group");
+  stageGrid.orientation = "column";
+  stageGrid.alignChildren = ["fill", "top"];
+  stageGrid.alignment = ["fill", "fill"];
+  stageGrid.spacing = GRID_SPACING;
+
   var stageStatusText = tabStage.add(
     "statictext",
     undefined,
@@ -3467,8 +3430,6 @@
   var stageCollapsed = {};
   var stageCtrlComp = null;
   var isRebuildingStage = false;
-  var stageLabEntries = null;
-  var stageLabName = "音素";
 
   function setStageStatus(text) {
     stageStatusText.text = text;
@@ -3511,6 +3472,9 @@
       }
 
       var collapseDepth = -1;
+      var panelW = stageGridPanel.size ? stageGridPanel.size.width : 360;
+      var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2;
+
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
 
@@ -3519,21 +3483,27 @@
           collapseDepth = -1;
         }
 
-        var row = stageGrid.add("group");
-        row.orientation = "row";
-        row.alignment = ["fill", "top"];
-        row.alignChildren = ["left", "center"];
-        row.spacing = 4;
-
         var indent = node.depth * 14;
+
+        // 1ノード = ヘッダ行（インデント+トグル+ラベル）+ 折り返した選択肢行
+        var block = stageGrid.add("group");
+        block.orientation = "column";
+        block.alignment = ["fill", "top"];
+        block.alignChildren = ["left", "top"];
+        block.spacing = 2;
+
+        var head = block.add("group");
+        head.orientation = "row";
+        head.alignChildren = ["left", "center"];
+        head.spacing = 4;
         if (indent > 0) {
-          var sp = row.add("group");
+          var sp = head.add("group");
           sp.preferredSize = [indent, 1];
         }
 
         var isCollapsed = !!stageCollapsed[node.comp.id];
         if (node.hasChildren) {
-          var tg = row.add("button", undefined, isCollapsed ? "▸" : "∇");
+          var tg = head.add("button", undefined, isCollapsed ? "▸" : "∇");
           tg.preferredSize = [22, BUTTON_HEIGHT];
           tg.onClick = (function (id) {
             return function () {
@@ -3542,127 +3512,99 @@
             };
           })(node.comp.id);
         } else {
-          var sp2 = row.add("group");
+          var sp2 = head.add("group");
           sp2.preferredSize = [22, 1];
         }
 
-        var lbl = row.add("statictext", undefined, node.displayName);
-        lbl.preferredSize = [LABEL_WIDTH + 20, BUTTON_HEIGHT];
+        var lbl = head.add(
+          "statictext",
+          undefined,
+          node.active ? node.displayName : node.displayName + " (非表示)",
+        );
         lbl.helpTip = node.comp.name;
 
+        // 選択肢を radio→optional の順でフラット化し、幅で折り返す
+        var items = [];
         var rr;
         for (rr = 0; rr < node.radioChoices.length; rr++) {
-          (function (nd, ch) {
-            var on = indexOfName(nd.visibleSet, ch.fullName) >= 0;
-            var btn = row.add(
-              "button",
-              undefined,
-              on ? "✔ " + ch.label : ch.label,
-            );
-            btn.helpTip = ch.fullName;
-            btn.onClick = function () {
-              if (!nd.ctrlComp) {
-                setStageStatus("制御コンポが見つかりません。");
-                return;
-              }
-              var radioNames = [];
-              for (var k = 0; k < nd.radioChoices.length; k++) {
-                radioNames.push(nd.radioChoices[k].fullName);
-              }
-              setRadioSelection(
-                nd.ctrlComp,
-                nd.comp.name,
-                nd.ctrlComp.time,
-                ch.fullName,
-                radioNames,
-              );
-              setStageStatus(nd.displayName + ": " + ch.label);
-              refreshStage(false);
-            };
-          })(node, node.radioChoices[rr]);
+          items.push({ ch: node.radioChoices[rr], kind: "radio" });
         }
-
         for (rr = 0; rr < node.optionalChoices.length; rr++) {
-          (function (nd, ch) {
-            var on = indexOfName(nd.visibleSet, ch.fullName) >= 0;
-            var cbx = row.add("checkbox", undefined, ch.label);
-            cbx.value = on;
-            cbx.helpTip = ch.fullName;
-            cbx.onClick = function () {
-              if (!nd.ctrlComp) {
-                setStageStatus("制御コンポが見つかりません。");
-                return;
-              }
-              toggleLayerInSet(
-                nd.ctrlComp,
-                nd.comp.name,
-                nd.ctrlComp.time,
-                ch.fullName,
-              );
-              setStageStatus(
-                nd.displayName + ": " + ch.label + (cbx.value ? " ON" : " OFF"),
-              );
-              refreshStage(false);
-            };
-          })(node, node.optionalChoices[rr]);
+          items.push({ ch: node.optionalChoices[rr], kind: "opt" });
         }
 
-        for (rr = 0; rr < node.forcedChoices.length; rr++) {
-          var fcb = row.add("checkbox", undefined, node.forcedChoices[rr].label);
-          fcb.value = true;
-          fcb.enabled = false;
-          fcb.helpTip = "常に表示 (!)";
-        }
-
-        // 口パク割当ボタン: 子 choice に母音(あ/い/う/え/お)が1つ以上あれば表示
-        // （母音ゼロの目階層などには出さない＝誤割当防止）
-        var mouthItems = [];
-        var mouthTokens = [];
-        var mouthSeen = {};
-        var mouthVowelCount = 0;
-        var allChoices = node.radioChoices.concat(node.optionalChoices);
-        for (rr = 0; rr < allChoices.length; rr++) {
-          var preset = mouthPresetForLabel(allChoices[rr].label);
-          if (!preset) continue;
-          if (preset.vowel) mouthVowelCount++;
-          mouthItems.push({
-            layer: allChoices[rr].layer,
-            myCsv: preset.csv,
-            isClosedFallback: preset.isClosedFallback,
-          });
-          var toks = normalizeCsvTokens(preset.csv);
-          for (var mt = 0; mt < toks.length; mt++) {
-            if (mouthSeen[toks[mt]]) continue;
-            mouthSeen[toks[mt]] = true;
-            mouthTokens.push(toks[mt]);
+        var choiceIndent = indent + 26;
+        var avail = availBase - choiceIndent;
+        if (avail < 80) avail = 80;
+        var curRow = null;
+        var curW = 0;
+        for (var ci = 0; ci < items.length; ci++) {
+          var est = items[ci].ch.label.length * 14 + 28;
+          if (curRow === null || (curW + est > avail && curW > 0)) {
+            curRow = block.add("group");
+            curRow.orientation = "row";
+            curRow.alignChildren = ["left", "center"];
+            curRow.spacing = 4;
+            var spc = curRow.add("group");
+            spc.preferredSize = [choiceIndent, 1];
+            curW = 0;
           }
-        }
-        if (mouthItems.length > 0 && mouthVowelCount > 0) {
-          (function (nd, items, allCsv) {
-            var mbtn = row.add("button", undefined, "口");
-            mbtn.preferredSize = [28, BUTTON_HEIGHT];
-            mbtn.helpTip =
-              "この階層の口形(" +
-              items.length +
-              "枚)に lab 口パクを割当（あ/い/う…を自動マッピング）";
-            mbtn.onClick = function () {
-              if (!stageCtrlComp) {
-                setStageStatus("制御コンポが見つかりません。");
-                return;
-              }
-              var result;
-              app.beginUndoGroup("立ち絵: 口パク割当");
-              try {
-                result = applyMappingToLayers(items, stageCtrlComp.name, allCsv);
-              } finally {
-                app.endUndoGroup();
-              }
-              var msg = nd.displayName + ": " + result.applied + " 枚を口パク割当";
-              if (result.emoLinked > 0) msg += "（表情と共存 " + result.emoLinked + "）";
-              setStageStatus(msg);
-              refreshStage(false);
-            };
-          })(node, mouthItems, mouthTokens.join(","));
+          (function (nd, it, parentRow) {
+            var on = indexOfName(nd.visibleSet, it.ch.fullName) >= 0;
+            if (it.kind === "radio") {
+              var btn = parentRow.add(
+                "button",
+                undefined,
+                on ? "✔ " + it.ch.label : it.ch.label,
+              );
+              btn.helpTip = it.ch.fullName;
+              btn.enabled = nd.active;
+              btn.onClick = function () {
+                if (!nd.ctrlComp) {
+                  setStageStatus("制御コンポが見つかりません。");
+                  return;
+                }
+                var radioNames = [];
+                for (var k = 0; k < nd.radioChoices.length; k++) {
+                  radioNames.push(nd.radioChoices[k].fullName);
+                }
+                setRadioSelection(
+                  nd.ctrlComp,
+                  nd.comp.name,
+                  nd.ctrlComp.time,
+                  it.ch.fullName,
+                  radioNames,
+                );
+                setStageStatus(nd.displayName + ": " + it.ch.label);
+                refreshStage(false);
+              };
+            } else {
+              var cbx = parentRow.add("checkbox", undefined, it.ch.label);
+              cbx.value = on;
+              cbx.helpTip = it.ch.fullName;
+              cbx.enabled = nd.active;
+              cbx.onClick = function () {
+                if (!nd.ctrlComp) {
+                  setStageStatus("制御コンポが見つかりません。");
+                  return;
+                }
+                toggleLayerInSet(
+                  nd.ctrlComp,
+                  nd.comp.name,
+                  nd.ctrlComp.time,
+                  it.ch.fullName,
+                );
+                setStageStatus(
+                  nd.displayName +
+                    ": " +
+                    it.ch.label +
+                    (cbx.value ? " ON" : " OFF"),
+                );
+                refreshStage(false);
+              };
+            }
+          })(node, items[ci], curRow);
+          curW += est + 4;
         }
 
         if (node.hasChildren && isCollapsed) collapseDepth = node.depth;
@@ -3675,12 +3617,31 @@
     }
   }
 
+  // 設定済み（[Emo] 制御レイヤーを持つ）コンポだけを列挙する
+  function rebuildStageRootDropdown(selectedName) {
+    var comps = getProjectComps();
+    stageRootDropdown.removeAll();
+    for (var i = 0; i < comps.length; i++) {
+      if (hasCtrlPrefixedLayer(comps[i])) {
+        stageRootDropdown.add("item", comps[i].name);
+      }
+    }
+    if (stageRootDropdown.items.length === 0) return;
+    for (var j = 0; j < stageRootDropdown.items.length; j++) {
+      if (stageRootDropdown.items[j].text === selectedName) {
+        stageRootDropdown.selection = j;
+        return;
+      }
+    }
+    stageRootDropdown.selection = 0;
+  }
+
   function refreshStage(rebuildDropdownToo) {
     if (rebuildDropdownToo) {
       var cur = stageRootDropdown.selection
         ? stageRootDropdown.selection.text
         : null;
-      rebuildDropdown(stageRootDropdown, cur);
+      rebuildStageRootDropdown(cur);
     }
 
     var rootComp = getSelectedComp(stageRootDropdown);
@@ -3700,13 +3661,15 @@
     }
     if (!stageCtrlComp) stageCtrlComp = rootComp;
 
-    // displayName / ctrlComp / visibleSet を解決
+    // displayName（共通prefix除去 + */! 除去）/ ctrlComp / visibleSet を解決
     var names = [];
     for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
     var prefix = detectCommonPrefix(names);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
-      nd.displayName = shortenGroupName(nd.comp.name, prefix);
+      nd.displayName = parsePsdLayerName(
+        shortenGroupName(nd.comp.name, prefix),
+      ).base;
       nd.ctrlComp =
         (nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null) ||
         stageCtrlComp;
@@ -3714,6 +3677,9 @@
         ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
         : [];
     }
+
+    // active 伝播（上位コンポ参照が選択されていない階層はグレーアウト）
+    computeStageActive(stageNodes);
 
     setCheckState(stageCtrlInfo, stageNodes.length > 0);
     rebuildStageTree();
@@ -3732,16 +3698,17 @@
     dlg.spacing = 6;
     var lines = [
       "【立ち絵タブ】PSDToolKit 立ち絵の階層をまとめて切り替えます。",
-      "1. PSDタブでセットアップ済みの立ち絵ルートコンポを選ぶ",
+      "1. 設定済みの立ち絵ルートコンポを選ぶ（PSDタブでセットアップ済みのもののみ表示）",
       "2. 目/口/服などの階層がインデントで並びます",
-      "   - ラジオ（* レイヤー）= ボタン（1つだけ表示）",
+      "   - ラジオ（* レイヤー/コンポ）= ボタン（1つだけ表示）",
       "   - 任意指定（無印レイヤー）= チェックボックス（独立 ON/OFF）",
-      "   - 常時表示（! レイヤー）= チェック済み・固定",
-      "3. ∇ / ▸ でサブ階層を折りたためます",
-      "4. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
+      "   - 常時表示（! レイヤー）= 常に出るので UI には出しません",
+      "3. ∇ / ▸ でサブ階層を折りたためます。選択肢は幅に応じて折り返します",
+      "4. 上位コンポが選択されていない階層はグレーアウトします",
+      "5. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
       "",
-      "再生ヘッドを動かした後は「更新」で現在状態を取り直してください",
-      "（ScriptUI は再生ヘッド移動を検知できないため手動更新です）。",
+      "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
+      "（取れない場合は「更新」。ScriptUI は再生ヘッド移動を直接検知できません）。",
       "",
       "「表情セット」で全階層の表示状態をまとめて保存/適用できます。",
     ];
@@ -3763,50 +3730,6 @@
 
   stageRootDropdown.onChange = function () {
     refreshStage(false);
-  };
-
-  stageLabBrowseBtn.onClick = function () {
-    var f = File.openDialog("labファイルを選択", "*.lab");
-    if (!f) return;
-    f.open("r");
-    var content = f.read();
-    f.close();
-    stageLabEntries = parseLabPhonemeEntries(content);
-    stageLabName = decodeURI(f.name).replace(/\.lab$/i, "");
-    stageLabPathText.text = decodeURI(f.name);
-    setStageStatus("lab を読み込みました。『配置』で制御コンポに音素を置きます。");
-  };
-
-  stageLabPlaceBtn.onClick = function () {
-    if (!stageLabEntries) {
-      setStageStatus("先に lab を選択してください（...）。");
-      return;
-    }
-    if (!stageCtrlComp) {
-      setStageStatus("立ち絵ルートを選択してください。");
-      return;
-    }
-    var offsetMs = parseFloat(stageLabOffsetInput.text) || 0;
-    var layer = null;
-    app.beginUndoGroup("立ち絵: lab配置");
-    try {
-      layer = placeLabIntoComp(
-        stageCtrlComp,
-        stageCtrlComp.time,
-        stageLabEntries,
-        offsetMs / 1000,
-        stageLabName,
-      );
-    } finally {
-      app.endUndoGroup();
-    }
-    if (!layer) {
-      setStageStatus("配置できる音素がありませんでした。");
-      return;
-    }
-    setStageStatus(
-      "[Lab] を配置しました: " + stageCtrlComp.name + " / 各口階層の「口」で割当",
-    );
   };
 
   stageSetSaveBtn.onClick = function () {
@@ -3902,7 +3825,7 @@
     rebuildDropdown(ctrlRow.dropdown, name);
     rebuildDropdown(psdRootRow.dropdown, name);
     rebuildDropdown(psdCtrlRow.dropdown, name);
-    rebuildDropdown(stageRootDropdown, name);
+    rebuildStageRootDropdown(name);
     rebuildList();
     refreshStage(false);
   })();
