@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.2
+ * @version 1.9.3
  * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -205,15 +205,9 @@
     return [
       'var ctrlComp = comp("' + escapeExprStr(ctrlCompName) + '");',
       'var ctrlName = "' + escapeExprStr(getCtrlLayerName(targetCompName)) + '";',
+      // 名前で直接アクセス（全レイヤー走査をやめて再生負荷を大幅に下げる）。
       "function findCtrlLayer() {",
-      "  var fallback = null;",
-      "  for (var i = 1; i <= ctrlComp.numLayers; i++) {",
-      "    var layer = ctrlComp.layer(i);",
-      "    if (layer.name !== ctrlName) continue;",
-      "    if (!fallback) fallback = layer;",
-      "    if (time >= layer.inPoint && time < layer.outPoint) return layer;",
-      "  }",
-      "  return fallback;",
+      "  try { return ctrlComp.layer(ctrlName); } catch (e) { return null; }",
       "}",
       "function getCurrentMarkerName(ctrlLayer) {",
       "  if (!ctrlLayer) return null;",
@@ -2410,6 +2404,16 @@
   function scanPsdCompTree(rootComp) {
     var groups = [];
     var visited = {};
+    // 再実行時、親コンポ参照レイヤーは uniquify 済みソース名（"<root>_*閉じ"）に
+    // 追従するため、ルート名prefix を剥がしてから */! を判定する。
+    var scanRootPrefix = rootComp.name + "_";
+    function parseScanName(name) {
+      var n =
+        name.indexOf(scanRootPrefix) === 0
+          ? name.substring(scanRootPrefix.length)
+          : name;
+      return parsePsdLayerName(n);
+    }
 
     function scanComp(comp) {
       if (visited[comp.id]) return;
@@ -2426,7 +2430,7 @@
 
       for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
-        var parsed = parsePsdLayerName(layer.name);
+        var parsed = parseScanName(layer.name);
 
         var source = null;
         try {
@@ -3301,6 +3305,17 @@
   function buildStageNodes(rootComp) {
     var visited = {};
     if (!rootComp) return [];
+    // uniquify が付けたルート名prefix（"<root>_"）を剥がしてから */! を判定する。
+    // 親コンポ参照レイヤーは uniquify 後のソース名（例 "zunda_s_*閉じ"）に追従するため、
+    // prefix を剥がさないと先頭の * を検出できない。
+    var stageRootPrefix = rootComp.name + "_";
+    function parseMarkerName(name) {
+      var n =
+        name.indexOf(stageRootPrefix) === 0
+          ? name.substring(stageRootPrefix.length)
+          : name;
+      return parsePsdLayerName(n);
+    }
 
     function walk(comp, depth, isRoot, refInfo) {
       if (!comp || visited[comp.id]) return [];
@@ -3322,7 +3337,7 @@
         } catch (eNull) {}
         if (isNull) continue;
 
-        var parsed = parsePsdLayerName(layer.name);
+        var parsed = parseMarkerName(layer.name);
 
         var src = null;
         try {
