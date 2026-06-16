@@ -246,6 +246,25 @@
    * 登録済みレイヤーのエクスプレッションから emo の制御情報を読み取る。
    * 合成式（口パク/目パチ）適用時に表情切替の登録を引き継ぐために使う。
    */
+  // escapeExprStr の逆変換（式リテラル → 実際の文字列）。
+  // 1文字ずつ走査して \\ \" \n を正しく復元する。
+  function unescapeExprStr(s) {
+    var str = String(s);
+    var out = "";
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charAt(i);
+      if (c === "\\" && i + 1 < str.length) {
+        var nx = str.charAt(i + 1);
+        if (nx === "n") out += "\n";
+        else out += nx; // " や \ はそのまま、それ以外も次文字を採用
+        i++;
+      } else {
+        out += c;
+      }
+    }
+    return out;
+  }
+
   function parseEmoContext(layer) {
     var expr = "";
     try {
@@ -255,14 +274,19 @@
     }
     if (!expr || expr.indexOf(EXPR_SIGNATURE) < 0) return null;
 
-    var compMatch = expr.match(/var ctrlComp = comp\("([\s\S]*?)"\);/);
-    var nameMatch = expr.match(/var ctrlName = "([\s\S]*?)";/);
+    // エスケープ済みリテラル（\" \\ を含みうる）を正しく取り出すため、
+    // \. または非"非\ の連続をキャプチャしてから unescape する。
+    var compMatch = expr.match(/var ctrlComp = comp\("((?:\\.|[^"\\])*)"\);/);
+    var nameMatch = expr.match(/var ctrlName = "((?:\\.|[^"\\])*)";/);
     if (!compMatch || !nameMatch) return null;
-    if (nameMatch[1].indexOf(CTRL_PREFIX) !== 0) return null;
+
+    var ctrlCompName = unescapeExprStr(compMatch[1]);
+    var ctrlName = unescapeExprStr(nameMatch[1]);
+    if (ctrlName.indexOf(CTRL_PREFIX) !== 0) return null;
 
     return {
-      ctrlCompName: compMatch[1],
-      targetCompName: nameMatch[1].substring(CTRL_PREFIX.length),
+      ctrlCompName: ctrlCompName,
+      targetCompName: ctrlName.substring(CTRL_PREFIX.length),
     };
   }
 
@@ -2439,8 +2463,8 @@
         var isFolder = !!(source && source instanceof CompItem);
 
         if (parsed.flipx || parsed.flipy) {
-          // 反転バリエーションは v1 では未対応。表示状態はそのまま維持する
-          if (parsed.exclusive || parsed.forced) info.flipSkipped.push(layer);
+          // 反転バリエーションは v1 では未対応。種別に関わらず必ずレポートする
+          info.flipSkipped.push(layer);
         } else if (parsed.exclusive) {
           info.exclusiveLayers.push({ layer: layer, parsed: parsed });
           if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
