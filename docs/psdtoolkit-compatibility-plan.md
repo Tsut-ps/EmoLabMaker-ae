@@ -70,7 +70,7 @@ EmoLabMaker を PSDToolKit(oov 氏 / AviUtl 用)向けに作られた立ち絵 P
 - `parsePsdLayerName(name)` → `{ base, exclusive(*), forced(!), flipx, flipy }`(`*!` 複合は順不同で剥がす)
 - `scanPsdCompTree(rootComp)`: AE の PSD インポート(COMP)では PSD グループ=ネストコンポになるため、コンポごとに `{ exclusiveLayers, forcedLayers, flipSkipped, defaultLayer }` を再帰収集。**ルートコンポ直下の `*` レイヤーも走査対象にする**(グループなしのフラット PSD 対応)。`defaultLayer` は exclusive のうち `layer.enabled === true` のもの(PSD の表示状態を継承)、なければ先頭
 - **`*` レイヤーが 1 枚もないグループ(線画・塗りなど)は制御レイヤーを作らずスキップ**する
-- 同一コンポ内の重複レイヤー名は ` (2)` 付与でリネーム(`dedupeLayerNames`)。`*` prefix は登録前に剥がしてリネーム(マーカー名・グリッドボタンに `*` を残さない)
+- 同一コンポ内の重複レイヤー名は ` (2)` 付与でリネーム(`dedupeLayerNames`)。**※ v1.7.0 以降はプレフィックス(`*`/`!`)を剥がさず保持し、表示時のみ `parsePsdLayerName(name).base` で整形する方針に変更**(当初の「`*` を剥がしてリネーム」は廃止)
 
 ### Step 3: 読み込み済み PSD の自動セットアップ / 更新(タブ3)
 

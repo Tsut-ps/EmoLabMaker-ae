@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.1
+ * @version 1.9.2
  * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -187,14 +187,24 @@
   // エクスプレッション
   // ══════════════════════════════════════════════════════════════════
 
+  // 式へ二重引用符文字列として埋め込む文字列をエスケープする。
+  // コンポ名・レイヤー名・CSV に " \ 改行 が含まれても式が壊れないようにする。
+  function escapeExprStr(s) {
+    return String(s === null || s === undefined ? "" : s)
+      .replace(/\\/g, "\\\\")
+      .replace(/"/g, '\\"')
+      .replace(/\r/g, "")
+      .replace(/\n/g, "\\n");
+  }
+
   /**
    * 表情マーカーのロジック部分（制御レイヤー探索 + 現在マーカー名取得）。
    * emo 単独式と、口パク/目パチの合成式で共有する。
    */
   function buildEmoMarkerSnippet(ctrlCompName, targetCompName) {
     return [
-      'var ctrlComp = comp("' + ctrlCompName + '");',
-      'var ctrlName = "' + getCtrlLayerName(targetCompName) + '";',
+      'var ctrlComp = comp("' + escapeExprStr(ctrlCompName) + '");',
+      'var ctrlName = "' + escapeExprStr(getCtrlLayerName(targetCompName)) + '";',
       "function findCtrlLayer() {",
       "  var fallback = null;",
       "  for (var i = 1; i <= ctrlComp.numLayers; i++) {",
@@ -423,10 +433,15 @@
 
   function parseSetString(str) {
     var out = [];
+    var seen = {};
     if (str === null || str === undefined) return out;
     var parts = String(str).split(",");
     for (var i = 0; i < parts.length; i++) {
-      if (parts[i].length > 0) out.push(parts[i]);
+      // 手編集等でスペースが混入しても一致するようトリム。空・重複は除外
+      var tok = parts[i].replace(/^\s+|\s+$/g, "");
+      if (tok.length === 0 || seen[tok]) continue;
+      seen[tok] = true;
+      out.push(tok);
     }
     return out;
   }
@@ -1445,7 +1460,7 @@
    */
   function buildPhonemeSnippet(targetCompName) {
     return [
-      'var targetComp = comp("' + targetCompName + '");',
+      'var targetComp = comp("' + escapeExprStr(targetCompName) + '");',
       "",
       "function findPhonemeLayer() {",
       "  for (var i = 1; i <= targetComp.numLayers; i++) {",
@@ -1504,8 +1519,8 @@
 
     lines = lines
       .concat([
-        'var myPhonemes = ",' + myCsv + ',";',
-        'var allPhonemes = ",' + allCsv + ',";',
+        'var myPhonemes = ",' + escapeExprStr(myCsv) + ',";',
+        'var allPhonemes = ",' + escapeExprStr(allCsv) + ',";',
         "var isClosedFallback = " + (isClosedFallback ? "true" : "false") + ";",
       ])
       .concat(buildPhonemeSnippet(phonemeCompName))
@@ -1559,7 +1574,7 @@
     dialog.orientation = "column";
     dialog.alignChildren = ["fill", "top"];
 
-    dialog.add("statictext", undefined, "制御レイヤーのある場所:");
+    dialog.add("statictext", undefined, "[Lab] 音素レイヤーのある場所:");
     var compDropdown = dialog.add("dropdownlist", undefined, compNames);
 
     for (var j = 0; j < compNames.length; j++) {
@@ -2845,7 +2860,7 @@
     ]);
 
     if (emoCtx) {
-      lines.push('var openNames = ",' + openNamesCsv + ',";');
+      lines.push('var openNames = ",' + escapeExprStr(openNamesCsv) + ',";');
       lines = lines.concat(
         buildEmoMarkerSnippet(emoCtx.ctrlCompName, emoCtx.targetCompName),
       );
