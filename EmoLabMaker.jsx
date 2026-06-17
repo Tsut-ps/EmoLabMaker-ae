@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.10.1
+ * @version 1.10.2
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3734,6 +3734,10 @@
 
         var lbl = head.add("statictext", undefined, node.displayName);
         lbl.helpTip = node.comp.name;
+
+        // 折りたたみ時は子ノードだけでなく、このノード直下の選択肢も隠す
+        // （ヘッダ＋トグルのみ残す）
+        if (node.hasChildren && isCollapsed) continue;
 
         // 選択肢を radio→optional の順でフラット化し、幅で折り返す
         var items = [];
