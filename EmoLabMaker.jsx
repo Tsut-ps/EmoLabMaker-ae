@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.10.0
+ * @version 1.10.1
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -2665,6 +2665,13 @@
           toRegister.push(group.optionalLayers[o].layer);
         }
 
+        // registerLayers が enabled=true に変えてしまう前に、任意指定レイヤーの
+        // 元の表示 / 非表示状態を記録する（PSD の初期表示を既定マーカーへ反映するため）
+        var optionalWasVisible = [];
+        for (var ov = 0; ov < group.optionalLayers.length; ov++) {
+          optionalWasVisible.push(!!group.optionalLayers[ov].layer.enabled);
+        }
+
         var layersToRegister = [];
         for (var t = 0; t < toRegister.length; t++) {
           var layer = toRegister[t];
@@ -2695,15 +2702,14 @@
           hasMarkers = ctrlLayer.property("Marker").numKeys > 0;
         } catch (err2) {}
         if (ctrlLayer && !hasMarkers) {
+          // 既定マーカー = PSD の初期表示を忠実に再現した「表示中集合」。
+          //   排他（*）: PSD で表示状態だったレイヤー（group.defaultLayer）のみ。
+          //              どれも非表示なら何も選ばない（強制的に先頭を表示しない）
+          //   任意（無印）: 登録前に記録した元の表示状態を維持
           var defaultNames = [];
-          var defLayer =
-            group.defaultLayer ||
-            (group.exclusiveLayers.length > 0
-              ? group.exclusiveLayers[0].layer
-              : null);
-          if (defLayer) defaultNames.push(defLayer.name);
+          if (group.defaultLayer) defaultNames.push(group.defaultLayer.name);
           for (var oo = 0; oo < group.optionalLayers.length; oo++) {
-            if (group.optionalLayers[oo].layer.enabled) {
+            if (optionalWasVisible[oo]) {
               defaultNames.push(group.optionalLayers[oo].layer.name);
             }
           }
@@ -2743,11 +2749,7 @@
     var checkboxes = [];
     for (var i = 0; i < groups.length; i++) {
       var group = groups[i];
-      var defaultLayer =
-        group.defaultLayer ||
-        (group.exclusiveLayers.length > 0
-          ? group.exclusiveLayers[0].layer
-          : null);
+      var defaultLayer = group.defaultLayer;
       var label =
         group.comp.name +
         "（排他 " +
