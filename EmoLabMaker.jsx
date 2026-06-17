@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.4
+ * @version 1.9.5
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3657,10 +3657,9 @@
         var curRow = null;
         var curW = 0;
         for (var ci = 0; ci < items.length; ci++) {
-          // ボタン幅の概算: 日本語1文字を広めに見積もる + 余白（チェックボックスはさらに広い）
-          var est =
-            items[ci].ch.label.length * 18 +
-            (items[ci].kind === "radio" ? 34 : 46);
+          // 全選択肢を同サイズの button に統一。状態/種別は先頭グリフで表す。
+          // グリフ(約4文字)+ボタン余白を含めて幅を控えめに見積もる
+          var est = items[ci].ch.label.length * 18 + 64;
           if (curRow === null || (curW + est > avail && curW > 0)) {
             curRow = block.add("group");
             curRow.orientation = "row";
@@ -3672,19 +3671,28 @@
           }
           (function (nd, it, parentRow) {
             var on = indexOfName(nd.visibleSet, it.ch.fullName) >= 0;
-            if (it.kind === "radio") {
-              var btn = parentRow.add(
-                "button",
-                undefined,
-                on ? "✔ " + it.ch.label : it.ch.label,
-              );
-              btn.helpTip = it.ch.fullName;
-              btn.enabled = nd.active;
-              btn.onClick = function () {
-                if (!nd.ctrlComp) {
-                  setStageStatus("制御コンポが見つかりません。");
-                  return;
-                }
+            // 先頭グリフ: ラジオ (●)/( ) 、トグル [x]/[ ] 、強制 [x]
+            var glyph;
+            if (it.kind === "radio") glyph = on ? "(●) " : "( ) ";
+            else if (it.kind === "forced") glyph = "[x] ";
+            else glyph = on ? "[x] " : "[ ] ";
+
+            var btn = parentRow.add("button", undefined, glyph + it.ch.label);
+            btn.preferredSize.height = BUTTON_HEIGHT;
+            btn.helpTip =
+              it.ch.fullName + (it.kind === "forced" ? "（常に表示 !）" : "");
+
+            if (it.kind === "forced") {
+              btn.enabled = false;
+              return;
+            }
+            btn.enabled = nd.active;
+            btn.onClick = function () {
+              if (!nd.ctrlComp) {
+                setStageStatus("制御コンポが見つかりません。");
+                return;
+              }
+              if (it.kind === "radio") {
                 var radioNames = [];
                 for (var k = 0; k < nd.radioChoices.length; k++) {
                   radioNames.push(nd.radioChoices[k].fullName);
@@ -3697,39 +3705,20 @@
                   radioNames,
                 );
                 setStageStatus(nd.displayName + ": " + it.ch.label);
-                refreshStage(false);
-              };
-            } else if (it.kind === "forced") {
-              // ! 常時表示。情報として出すが操作不可（グレーアウト）
-              var fcb = parentRow.add("checkbox", undefined, it.ch.label);
-              fcb.value = true;
-              fcb.enabled = false;
-              fcb.helpTip = it.ch.fullName + "（常に表示 !）";
-            } else {
-              var cbx = parentRow.add("checkbox", undefined, it.ch.label);
-              cbx.value = on;
-              cbx.helpTip = it.ch.fullName;
-              cbx.enabled = nd.active;
-              cbx.onClick = function () {
-                if (!nd.ctrlComp) {
-                  setStageStatus("制御コンポが見つかりません。");
-                  return;
-                }
+              } else {
                 toggleLayerInSet(
                   nd.ctrlComp,
                   nd.comp.name,
                   nd.ctrlComp.time,
                   it.ch.fullName,
                 );
+                // on は変更前の状態。トグル後は反転する
                 setStageStatus(
-                  nd.displayName +
-                    ": " +
-                    it.ch.label +
-                    (cbx.value ? " ON" : " OFF"),
+                  nd.displayName + ": " + it.ch.label + (on ? " OFF" : " ON"),
                 );
-                refreshStage(false);
-              };
-            }
+              }
+              refreshStage(false);
+            };
           })(node, items[ci], curRow);
           curW += est + 4;
         }
