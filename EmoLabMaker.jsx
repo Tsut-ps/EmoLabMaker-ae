@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.7
+ * @version 1.10.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -18,6 +18,44 @@
   var BUTTON_HEIGHT = 24;
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
   var BLINK_SIGNATURE = "emoBlinkAuto";
+
+  // ════════════════════════════════════════════════════════════════
+  // 設定（app.settings で AE 環境に永続化。プロジェクト非依存）
+  // ════════════════════════════════════════════════════════════════
+  var SETTINGS_SECTION = "EmoLabMaker";
+  function getSettingBool(key, def) {
+    try {
+      if (app.settings.haveSetting(SETTINGS_SECTION, key)) {
+        return app.settings.getSetting(SETTINGS_SECTION, key) === "true";
+      }
+    } catch (e) {}
+    return def;
+  }
+  function setSettingBool(key, val) {
+    try {
+      app.settings.saveSetting(SETTINGS_SECTION, key, val ? "true" : "false");
+    } catch (e) {}
+  }
+  function getSettingNum(key, def) {
+    try {
+      if (app.settings.haveSetting(SETTINGS_SECTION, key)) {
+        var v = parseFloat(app.settings.getSetting(SETTINGS_SECTION, key));
+        if (!isNaN(v)) return v;
+      }
+    } catch (e) {}
+    return def;
+  }
+  function setSettingNum(key, val) {
+    try {
+      app.settings.saveSetting(SETTINGS_SECTION, key, String(val));
+    } catch (e) {}
+  }
+
+  // 立ち絵タブの表示設定（起動時に読み込み）
+  var cfgFollowPlayhead = getSettingBool("followPlayhead", true);
+  var cfgShowForced = getSettingBool("showForced", true);
+  var cfgHideInactive = getSettingBool("hideInactive", false);
+  var cfgIndentWidth = getSettingNum("indentWidth", 14);
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -3191,6 +3229,66 @@
     alert(message);
   };
 
+  // ── 設定（立ち絵タブの表示・挙動。app.settings で永続化） ──
+  var settingsPanel = tabPsd.add("panel", undefined, "設定");
+  settingsPanel.orientation = "column";
+  settingsPanel.alignChildren = ["left", "top"];
+  settingsPanel.alignment = ["fill", "bottom"];
+  settingsPanel.spacing = 4;
+  settingsPanel.margins = 10;
+
+  var cbFollow = settingsPanel.add(
+    "checkbox",
+    undefined,
+    "再生ヘッド追従（立ち絵タブを触ると現在状態に同期）",
+  );
+  cbFollow.value = cfgFollowPlayhead;
+  cbFollow.onClick = function () {
+    cfgFollowPlayhead = cbFollow.value;
+    setSettingBool("followPlayhead", cfgFollowPlayhead);
+  };
+
+  var cbForced = settingsPanel.add(
+    "checkbox",
+    undefined,
+    "立ち絵タブで「!」常時表示レイヤーを表示",
+  );
+  cbForced.value = cfgShowForced;
+  cbForced.onClick = function () {
+    cfgShowForced = cbForced.value;
+    setSettingBool("showForced", cfgShowForced);
+    refreshStage(false);
+  };
+
+  var cbHideInactive = settingsPanel.add(
+    "checkbox",
+    undefined,
+    "非アクティブ階層を隠す（グレーアウトの代わりに非表示）",
+  );
+  cbHideInactive.value = cfgHideInactive;
+  cbHideInactive.onClick = function () {
+    cfgHideInactive = cbHideInactive.value;
+    setSettingBool("hideInactive", cfgHideInactive);
+    refreshStage(false);
+  };
+
+  var indentRow = settingsPanel.add("group");
+  indentRow.orientation = "row";
+  indentRow.alignChildren = ["left", "center"];
+  indentRow.spacing = 4;
+  indentRow.add("statictext", undefined, "インデント幅(px)");
+  var indentInput = indentRow.add("edittext", undefined, String(cfgIndentWidth));
+  indentInput.preferredSize = [44, BUTTON_HEIGHT];
+  indentInput.onChange = function () {
+    var v = parseFloat(indentInput.text);
+    if (isNaN(v) || v < 0) v = 14;
+    if (v > 60) v = 60;
+    cfgIndentWidth = v;
+    indentInput.text = String(v);
+    setSettingNum("indentWidth", v);
+    refreshStage(false);
+  };
+
   var psdStatusText = tabPsd.add(
     "statictext",
     undefined,
@@ -3596,8 +3694,10 @@
         var node = stageNodes[n];
         // 祖先のいずれかが折りたたまれていれば隠す
         if (isCollapsedHidden(node)) continue;
+        // 設定: 非アクティブ階層を隠す（グレーアウトの代わり）
+        if (cfgHideInactive && !node.active) continue;
 
-        var indent = node.depth * 14;
+        var indent = node.depth * cfgIndentWidth;
 
         // 1ノード = ヘッダ行（インデント+トグル+ラベル）+ 折り返した選択肢行
         var block = stageGrid.add("group");
@@ -3642,8 +3742,10 @@
         for (rr = 0; rr < node.optionalChoices.length; rr++) {
           items.push({ ch: node.optionalChoices[rr], kind: "opt" });
         }
-        for (rr = 0; rr < node.forcedChoices.length; rr++) {
-          items.push({ ch: node.forcedChoices[rr], kind: "forced" });
+        if (cfgShowForced) {
+          for (rr = 0; rr < node.forcedChoices.length; rr++) {
+            items.push({ ch: node.forcedChoices[rr], kind: "forced" });
+          }
         }
 
         var choiceIndent = indent + 26;
@@ -3981,7 +4083,7 @@
   // その場で更新する（ボタンを作り直さないので「2回クリック」問題は起きない）。
   win.onActivate = function () {
     try {
-      if (tabs.selection === tabStage) syncStageControls();
+      if (cfgFollowPlayhead && tabs.selection === tabStage) syncStageControls();
     } catch (e) {}
   };
 
