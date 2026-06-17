@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.5
+ * @version 1.9.6
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3487,6 +3487,31 @@
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
+  // ── ツール行（フィルタ / 一括開閉） ──
+  var stageToolRow = tabStage.add("group");
+  stageToolRow.orientation = "row";
+  stageToolRow.alignment = ["fill", "top"];
+  stageToolRow.alignChildren = ["left", "center"];
+  stageToolRow.spacing = 4;
+
+  stageToolRow.add("statictext", undefined, "絞込");
+  var stageFilterInput = stageToolRow.add("edittext", undefined, "");
+  stageFilterInput.alignment = ["fill", "center"];
+  stageFilterInput.preferredSize.height = BUTTON_HEIGHT;
+  stageFilterInput.helpTip = "グループ名・選択肢名で絞り込み（一致＋その親を表示）";
+
+  var stageFilterClearBtn = stageToolRow.add("button", undefined, "×");
+  stageFilterClearBtn.preferredSize = [24, BUTTON_HEIGHT];
+  stageFilterClearBtn.helpTip = "絞り込みを解除";
+
+  var stageExpandBtn = stageToolRow.add("button", undefined, "全開");
+  stageExpandBtn.preferredSize = [40, BUTTON_HEIGHT];
+  stageExpandBtn.helpTip = "すべての階層を展開";
+
+  var stageCollapseBtn = stageToolRow.add("button", undefined, "全閉");
+  stageCollapseBtn.preferredSize = [40, BUTTON_HEIGHT];
+  stageCollapseBtn.helpTip = "すべての階層を折りたたむ";
+
   // 表情セット（ツリーの上に配置）
   var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
   stageSetPanel.orientation = "row";
@@ -3533,6 +3558,28 @@
   var stageCtrlComp = null;
   var isRebuildingStage = false;
   var stageScrollValue = 0;
+  var stageButtons = []; // 描画済み選択肢ボタン（再生ヘッド追従の即時更新用）
+
+  stageFilterInput.onChanging = function () {
+    stageScrollValue = 0;
+    rebuildStageTree();
+  };
+  stageFilterClearBtn.onClick = function () {
+    stageFilterInput.text = "";
+    stageScrollValue = 0;
+    rebuildStageTree();
+  };
+  stageExpandBtn.onClick = function () {
+    stageCollapsed = {};
+    rebuildStageTree();
+  };
+  stageCollapseBtn.onClick = function () {
+    stageCollapsed = {};
+    for (var i = 0; i < stageNodes.length; i++) {
+      if (stageNodes[i].hasChildren) stageCollapsed[stageNodes[i].comp.id] = true;
+    }
+    rebuildStageTree();
+  };
 
   // スクロールバー操作: 中身を上下に移動（再構築せず軽量）
   stageScroll.onChanging = stageScroll.onChange = function () {
@@ -3563,6 +3610,41 @@
     stageSetDropdown.selection = 0;
   }
 
+  // フィルタ: 各ノードを「一致 or 一致ノードの祖先」なら表示する真偽配列を返す
+  function computeStageFilter(text) {
+    var lower = text.toLowerCase ? text.toLowerCase() : text;
+    function contains(s) {
+      if (!s) return false;
+      var t = s.toLowerCase ? s.toLowerCase() : s;
+      return t.indexOf(lower) >= 0;
+    }
+    function nodeMatches(nd) {
+      if (contains(nd.displayName)) return true;
+      var arrs = [nd.radioChoices, nd.optionalChoices, nd.forcedChoices];
+      for (var a = 0; a < arrs.length; a++) {
+        for (var j = 0; j < arrs[a].length; j++) {
+          if (contains(arrs[a][j].label)) return true;
+        }
+      }
+      return false;
+    }
+    var show = [];
+    var i;
+    for (i = 0; i < stageNodes.length; i++) show[i] = nodeMatches(stageNodes[i]);
+    // 一致ノードの祖先（直近の浅い depth）も表示する
+    for (i = 0; i < stageNodes.length; i++) {
+      if (!show[i]) continue;
+      var d = stageNodes[i].depth;
+      for (var k = i - 1; k >= 0 && d > 0; k--) {
+        if (stageNodes[k].depth < d) {
+          show[k] = true;
+          d = stageNodes[k].depth;
+        }
+      }
+    }
+    return show;
+  }
+
   function rebuildStageTree() {
     if (isRebuildingStage) return;
     isRebuildingStage = true;
@@ -3589,10 +3671,20 @@
       // スクロールバー分(約18px)を差し引いた幅で折り返す
       var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2 - 18;
 
+      stageButtons = [];
+      // 名前フィルタ: 一致ノード＋その祖先のみ表示（フィルタ中は折りたたみ無視）
+      var filterText = stageFilterInput
+        ? stageFilterInput.text.replace(/^\s+|\s+$/g, "")
+        : "";
+      var filterActive = filterText.length > 0;
+      var filterShow = filterActive ? computeStageFilter(filterText) : null;
+
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
 
-        if (collapseDepth >= 0) {
+        if (filterActive) {
+          if (!filterShow[n]) continue;
+        } else if (collapseDepth >= 0) {
           if (node.depth > collapseDepth) continue;
           collapseDepth = -1;
         }
@@ -3671,16 +3763,21 @@
           }
           (function (nd, it, parentRow) {
             var on = indexOfName(nd.visibleSet, it.ch.fullName) >= 0;
-            // 先頭グリフ: ラジオ (●)/( ) 、トグル [x]/[ ] 、強制 [x]
-            var glyph;
-            if (it.kind === "radio") glyph = on ? "(●) " : "( ) ";
-            else if (it.kind === "forced") glyph = "[x] ";
-            else glyph = on ? "[x] " : "[ ] ";
-
-            var btn = parentRow.add("button", undefined, glyph + it.ch.label);
+            var btn = parentRow.add(
+              "button",
+              undefined,
+              stageChoiceGlyph(it.kind, on) + it.ch.label,
+            );
             btn.preferredSize.height = BUTTON_HEIGHT;
             btn.helpTip =
               it.ch.fullName + (it.kind === "forced" ? "（常に表示 !）" : "");
+            // 再生ヘッド追従の即時更新用に参照を保持
+            stageButtons.push({
+              btn: btn,
+              node: nd,
+              ch: it.ch,
+              kind: it.kind,
+            });
 
             if (it.kind === "forced") {
               btn.enabled = false;
@@ -3723,7 +3820,8 @@
           curW += est + 4;
         }
 
-        if (node.hasChildren && isCollapsed) collapseDepth = node.depth;
+        if (!filterActive && node.hasChildren && isCollapsed)
+          collapseDepth = node.depth;
       }
 
       stageGrid.layout.layout(true);
@@ -3779,22 +3877,10 @@
     stageRootDropdown.selection = 0;
   }
 
-  function refreshStage(rebuildDropdownToo) {
-    if (rebuildDropdownToo) {
-      // カレントで開いているコンポが設定済みなら、それを優先選択（現在の立ち絵に追従）。
-      // そうでなければ現在の選択を維持。
-      var cur = stageRootDropdown.selection
-        ? stageRootDropdown.selection.text
-        : null;
-      var ac = getActiveComp();
-      var prefer = ac && hasCtrlPrefixedLayer(ac) ? ac.name : cur;
-      rebuildStageRootDropdown(prefer);
-    }
-
+  // 現在の stageNodes に対し ctrlComp / displayName / visibleSet / active を解決する
+  // （構造は変えない。再生ヘッド追従の軽量同期でも使う）
+  function resolveStageState() {
     var rootComp = getSelectedComp(stageRootDropdown);
-    stageNodes = buildStageNodes(rootComp);
-
-    // 制御コンポ導出（最初に見つかったもの、なければルート）
     stageCtrlComp = null;
     var i;
     for (i = 0; i < stageNodes.length; i++) {
@@ -3808,9 +3894,6 @@
     }
     if (!stageCtrlComp) stageCtrlComp = rootComp;
 
-    // displayName（ルート名prefix除去 + */! 除去）/ ctrlComp / visibleSet を解決
-    // セットアップは各グループを "<ルート名>_<グループ名>" に一意化するため、
-    // ルート名prefix を剥がせばよい（共通prefix推測より安全）。
     var names = [];
     for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
     var prefix = rootComp ? rootComp.name + "_" : detectCommonPrefix(names);
@@ -3826,9 +3909,45 @@
         ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
         : [];
     }
-
-    // active 伝播（上位コンポ参照が選択されていない階層はグレーアウト）
     computeStageActive(stageNodes);
+  }
+
+  // ボタンを作り直さず、既存ボタンのグリフ/有効状態だけ現在時刻に合わせて更新する。
+  // （再生ヘッド移動後の追従。ボタンを破棄しないので「2回クリック」問題が出ない）
+  function syncStageGlyphs() {
+    if (!stageNodes || stageNodes.length === 0) return;
+    resolveStageState();
+    for (var i = 0; i < stageButtons.length; i++) {
+      var e = stageButtons[i];
+      try {
+        var on = indexOfName(e.node.visibleSet, e.ch.fullName) >= 0;
+        e.btn.text = stageChoiceGlyph(e.kind, on) + e.ch.label;
+        if (e.kind !== "forced") e.btn.enabled = e.node.active;
+      } catch (err) {}
+    }
+  }
+
+  function stageChoiceGlyph(kind, on) {
+    if (kind === "radio") return on ? "(●) " : "( ) ";
+    if (kind === "forced") return "[x] ";
+    return on ? "[x] " : "[ ] ";
+  }
+
+  function refreshStage(rebuildDropdownToo) {
+    if (rebuildDropdownToo) {
+      // カレントで開いているコンポが設定済みなら、それを優先選択（現在の立ち絵に追従）。
+      // そうでなければ現在の選択を維持。
+      var cur = stageRootDropdown.selection
+        ? stageRootDropdown.selection.text
+        : null;
+      var ac = getActiveComp();
+      var prefer = ac && hasCtrlPrefixedLayer(ac) ? ac.name : cur;
+      rebuildStageRootDropdown(prefer);
+    }
+
+    var rootComp = getSelectedComp(stageRootDropdown);
+    stageNodes = buildStageNodes(rootComp);
+    resolveStageState();
 
     setCheckState(stageCtrlInfo, stageNodes.length > 0);
     rebuildStageTree();
@@ -3955,9 +4074,13 @@
     if (tabs.selection === tabStage) refreshStage(true);
   };
 
-  // 注: ウィンドウのアクティブ化で自動更新すると、クリックした瞬間に再描画されて
-  // ボタンが作り直され「2回クリックしないと反映されない」不具合になるため行わない。
-  // 再生ヘッド移動後は「更新」ボタンで取り直す（クリック操作自体は1回で反映される）。
+  // 再生ヘッド追従: パネルがアクティブになったら、既存ボタンのグリフ/有効状態だけ
+  // その場で更新する（ボタンを作り直さないので「2回クリック」問題は起きない）。
+  win.onActivate = function () {
+    try {
+      if (tabs.selection === tabStage) syncStageGlyphs();
+    } catch (e) {}
+  };
 
   // ════════════════════════════════════════════════════════════════
   // 初期化
