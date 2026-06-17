@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.10.2
+ * @version 1.10.3
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3635,6 +3635,22 @@
   var isRebuildingStage = false;
   var stageScrollValue = 0;
   var stageButtons = []; // 描画済み選択肢コントロール（追従の即時更新用）
+  var stageWarnings = []; // 「未選択」警告ラベル（{ctrl, node}）
+
+  // 警告条件: 中身がすべてラジオ（排他）なのに、現在どれも選択されていない階層。
+  // = 任意/強制の選択肢がなく、ラジオが1つ以上あり、表示中集合にどれも含まれない。
+  // （上位未選択でグレーアウト中の階層は対象外）
+  function isRadioGroupUnselected(node) {
+    if (!node || !node.active) return false;
+    if (node.optionalChoices.length > 0 || node.forcedChoices.length > 0)
+      return false;
+    if (node.radioChoices.length === 0) return false;
+    for (var i = 0; i < node.radioChoices.length; i++) {
+      if (indexOfName(node.visibleSet, node.radioChoices[i].fullName) >= 0)
+        return false;
+    }
+    return true;
+  }
 
   // スクロールバー操作: 中身を上下に移動（再構築せず軽量）
   stageScroll.onChanging = stageScroll.onChange = function () {
@@ -3691,6 +3707,7 @@
       var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2 - 18;
 
       stageButtons = [];
+      stageWarnings = [];
 
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
@@ -3734,6 +3751,14 @@
 
         var lbl = head.add("statictext", undefined, node.displayName);
         lbl.helpTip = node.comp.name;
+
+        // すべてラジオなのに何も選択されていない階層は警告を出す
+        var warn = head.add("statictext", undefined, "⚠ 未選択");
+        warn.helpTip =
+          "この階層は排他（ラジオ）のみですが、何も表示されていません。いずれかを選択してください。";
+        setCheckColor(warn, [0.95, 0.45, 0.15, 1]);
+        warn.visible = isRadioGroupUnselected(node);
+        stageWarnings.push({ ctrl: warn, node: node });
 
         // 折りたたみ時は子ノードだけでなく、このノード直下の選択肢も隠す
         // （ヘッダ＋トグルのみ残す）
@@ -3930,6 +3955,13 @@
         e.ctrl.value = on;
         e.ctrl.enabled = e.node.active;
       } catch (err) {}
+    }
+    for (var w = 0; w < stageWarnings.length; w++) {
+      try {
+        stageWarnings[w].ctrl.visible = isRadioGroupUnselected(
+          stageWarnings[w].node,
+        );
+      } catch (err2) {}
     }
   }
 
