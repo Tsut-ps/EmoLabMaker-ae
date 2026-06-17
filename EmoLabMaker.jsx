@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.6
+ * @version 1.9.7
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3442,10 +3442,11 @@
     var lastAtDepth = {};
     for (var i = 0; i < nodes.length; i++) {
       var nn = nodes[i];
+      var parent = nn.depth === 0 ? null : lastAtDepth[nn.depth - 1] || null;
+      nn.parent = parent; // 折りたたみ判定にも使う
       if (nn.depth === 0) {
         nn.active = true;
       } else {
-        var parent = lastAtDepth[nn.depth - 1];
         var refVisible;
         if (nn.refForced) {
           refVisible = true;
@@ -3486,31 +3487,6 @@
 
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
-
-  // ── ツール行（フィルタ / 一括開閉） ──
-  var stageToolRow = tabStage.add("group");
-  stageToolRow.orientation = "row";
-  stageToolRow.alignment = ["fill", "top"];
-  stageToolRow.alignChildren = ["left", "center"];
-  stageToolRow.spacing = 4;
-
-  stageToolRow.add("statictext", undefined, "絞込");
-  var stageFilterInput = stageToolRow.add("edittext", undefined, "");
-  stageFilterInput.alignment = ["fill", "center"];
-  stageFilterInput.preferredSize.height = BUTTON_HEIGHT;
-  stageFilterInput.helpTip = "グループ名・選択肢名で絞り込み（一致＋その親を表示）";
-
-  var stageFilterClearBtn = stageToolRow.add("button", undefined, "×");
-  stageFilterClearBtn.preferredSize = [24, BUTTON_HEIGHT];
-  stageFilterClearBtn.helpTip = "絞り込みを解除";
-
-  var stageExpandBtn = stageToolRow.add("button", undefined, "全開");
-  stageExpandBtn.preferredSize = [40, BUTTON_HEIGHT];
-  stageExpandBtn.helpTip = "すべての階層を展開";
-
-  var stageCollapseBtn = stageToolRow.add("button", undefined, "全閉");
-  stageCollapseBtn.preferredSize = [40, BUTTON_HEIGHT];
-  stageCollapseBtn.helpTip = "すべての階層を折りたたむ";
 
   // 表情セット（ツリーの上に配置）
   var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
@@ -3558,28 +3534,7 @@
   var stageCtrlComp = null;
   var isRebuildingStage = false;
   var stageScrollValue = 0;
-  var stageButtons = []; // 描画済み選択肢ボタン（再生ヘッド追従の即時更新用）
-
-  stageFilterInput.onChanging = function () {
-    stageScrollValue = 0;
-    rebuildStageTree();
-  };
-  stageFilterClearBtn.onClick = function () {
-    stageFilterInput.text = "";
-    stageScrollValue = 0;
-    rebuildStageTree();
-  };
-  stageExpandBtn.onClick = function () {
-    stageCollapsed = {};
-    rebuildStageTree();
-  };
-  stageCollapseBtn.onClick = function () {
-    stageCollapsed = {};
-    for (var i = 0; i < stageNodes.length; i++) {
-      if (stageNodes[i].hasChildren) stageCollapsed[stageNodes[i].comp.id] = true;
-    }
-    rebuildStageTree();
-  };
+  var stageButtons = []; // 描画済み選択肢コントロール（追従の即時更新用）
 
   // スクロールバー操作: 中身を上下に移動（再構築せず軽量）
   stageScroll.onChanging = stageScroll.onChange = function () {
@@ -3610,41 +3565,6 @@
     stageSetDropdown.selection = 0;
   }
 
-  // フィルタ: 各ノードを「一致 or 一致ノードの祖先」なら表示する真偽配列を返す
-  function computeStageFilter(text) {
-    var lower = text.toLowerCase ? text.toLowerCase() : text;
-    function contains(s) {
-      if (!s) return false;
-      var t = s.toLowerCase ? s.toLowerCase() : s;
-      return t.indexOf(lower) >= 0;
-    }
-    function nodeMatches(nd) {
-      if (contains(nd.displayName)) return true;
-      var arrs = [nd.radioChoices, nd.optionalChoices, nd.forcedChoices];
-      for (var a = 0; a < arrs.length; a++) {
-        for (var j = 0; j < arrs[a].length; j++) {
-          if (contains(arrs[a][j].label)) return true;
-        }
-      }
-      return false;
-    }
-    var show = [];
-    var i;
-    for (i = 0; i < stageNodes.length; i++) show[i] = nodeMatches(stageNodes[i]);
-    // 一致ノードの祖先（直近の浅い depth）も表示する
-    for (i = 0; i < stageNodes.length; i++) {
-      if (!show[i]) continue;
-      var d = stageNodes[i].depth;
-      for (var k = i - 1; k >= 0 && d > 0; k--) {
-        if (stageNodes[k].depth < d) {
-          show[k] = true;
-          d = stageNodes[k].depth;
-        }
-      }
-    }
-    return show;
-  }
-
   function rebuildStageTree() {
     if (isRebuildingStage) return;
     isRebuildingStage = true;
@@ -3666,28 +3586,16 @@
         return;
       }
 
-      var collapseDepth = -1;
       var panelW = stageGridPanel.size ? stageGridPanel.size.width : 360;
       // スクロールバー分(約18px)を差し引いた幅で折り返す
       var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2 - 18;
 
       stageButtons = [];
-      // 名前フィルタ: 一致ノード＋その祖先のみ表示（フィルタ中は折りたたみ無視）
-      var filterText = stageFilterInput
-        ? stageFilterInput.text.replace(/^\s+|\s+$/g, "")
-        : "";
-      var filterActive = filterText.length > 0;
-      var filterShow = filterActive ? computeStageFilter(filterText) : null;
 
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
-
-        if (filterActive) {
-          if (!filterShow[n]) continue;
-        } else if (collapseDepth >= 0) {
-          if (node.depth > collapseDepth) continue;
-          collapseDepth = -1;
-        }
+        // 祖先のいずれかが折りたたまれていれば隠す
+        if (isCollapsedHidden(node)) continue;
 
         var indent = node.depth * 14;
 
@@ -3722,11 +3630,7 @@
           sp2.preferredSize = [22, 1];
         }
 
-        var lbl = head.add(
-          "statictext",
-          undefined,
-          node.active ? node.displayName : node.displayName + " (非表示)",
-        );
+        var lbl = head.add("statictext", undefined, node.displayName);
         lbl.helpTip = node.comp.name;
 
         // 選択肢を radio→optional の順でフラット化し、幅で折り返す
@@ -3749,9 +3653,8 @@
         var curRow = null;
         var curW = 0;
         for (var ci = 0; ci < items.length; ci++) {
-          // 全選択肢を同サイズの button に統一。状態/種別は先頭グリフで表す。
-          // グリフ(約4文字)+ボタン余白を含めて幅を控えめに見積もる
-          var est = items[ci].ch.label.length * 18 + 64;
+          // ラジオ=radiobutton / 任意=checkbox / 強制=無効checkbox。幅で折返し
+          var est = items[ci].ch.label.length * 18 + 40;
           if (curRow === null || (curW + est > avail && curW > 0)) {
             curRow = block.add("group");
             curRow.orientation = "row";
@@ -3763,28 +3666,28 @@
           }
           (function (nd, it, parentRow) {
             var on = indexOfName(nd.visibleSet, it.ch.fullName) >= 0;
-            var btn = parentRow.add(
-              "button",
-              undefined,
-              stageChoiceGlyph(it.kind, on) + it.ch.label,
-            );
-            btn.preferredSize.height = BUTTON_HEIGHT;
-            btn.helpTip =
+            var ctrl;
+            if (it.kind === "radio") {
+              ctrl = parentRow.add("radiobutton", undefined, it.ch.label);
+            } else {
+              ctrl = parentRow.add("checkbox", undefined, it.ch.label);
+            }
+            ctrl.value = it.kind === "forced" ? true : on;
+            ctrl.helpTip =
               it.ch.fullName + (it.kind === "forced" ? "（常に表示 !）" : "");
-            // 再生ヘッド追従の即時更新用に参照を保持
             stageButtons.push({
-              btn: btn,
+              ctrl: ctrl,
               node: nd,
               ch: it.ch,
               kind: it.kind,
             });
 
             if (it.kind === "forced") {
-              btn.enabled = false;
+              ctrl.enabled = false;
               return;
             }
-            btn.enabled = nd.active;
-            btn.onClick = function () {
+            ctrl.enabled = nd.active;
+            ctrl.onClick = function () {
               if (!nd.ctrlComp) {
                 setStageStatus("制御コンポが見つかりません。");
                 return;
@@ -3801,7 +3704,6 @@
                   it.ch.fullName,
                   radioNames,
                 );
-                setStageStatus(nd.displayName + ": " + it.ch.label);
               } else {
                 toggleLayerInSet(
                   nd.ctrlComp,
@@ -3809,19 +3711,14 @@
                   nd.ctrlComp.time,
                   it.ch.fullName,
                 );
-                // on は変更前の状態。トグル後は反転する
-                setStageStatus(
-                  nd.displayName + ": " + it.ch.label + (on ? " OFF" : " ON"),
-                );
               }
-              refreshStage(false);
+              setStageStatus(nd.displayName + ": " + it.ch.label);
+              // 構造は変えず表示状態だけ即時同期（再構築しないので排他選択が軽い）
+              syncStageControls();
             };
           })(node, items[ci], curRow);
           curW += est + 4;
         }
-
-        if (!filterActive && node.hasChildren && isCollapsed)
-          collapseDepth = node.depth;
       }
 
       stageGrid.layout.layout(true);
@@ -3912,25 +3809,30 @@
     computeStageActive(stageNodes);
   }
 
-  // ボタンを作り直さず、既存ボタンのグリフ/有効状態だけ現在時刻に合わせて更新する。
-  // （再生ヘッド移動後の追従。ボタンを破棄しないので「2回クリック」問題が出ない）
-  function syncStageGlyphs() {
+  // コントロールを作り直さず、チェック状態と有効/無効だけ現在時刻に合わせて更新する。
+  // （再生ヘッド追従＆クリック後の軽量反映。作り直さないので「2回クリック」問題も再生負荷も回避）
+  function syncStageControls() {
     if (!stageNodes || stageNodes.length === 0) return;
     resolveStageState();
     for (var i = 0; i < stageButtons.length; i++) {
       var e = stageButtons[i];
       try {
+        if (e.kind === "forced") continue;
         var on = indexOfName(e.node.visibleSet, e.ch.fullName) >= 0;
-        e.btn.text = stageChoiceGlyph(e.kind, on) + e.ch.label;
-        if (e.kind !== "forced") e.btn.enabled = e.node.active;
+        e.ctrl.value = on;
+        e.ctrl.enabled = e.node.active;
       } catch (err) {}
     }
   }
 
-  function stageChoiceGlyph(kind, on) {
-    if (kind === "radio") return on ? "(●) " : "( ) ";
-    if (kind === "forced") return "[x] ";
-    return on ? "[x] " : "[ ] ";
+  // 祖先のいずれかが折りたたまれているか（折りたたみ表示判定）
+  function isCollapsedHidden(node) {
+    var p = node.parent;
+    while (p) {
+      if (stageCollapsed[p.comp.id]) return true;
+      p = p.parent;
+    }
+    return false;
   }
 
   function refreshStage(rebuildDropdownToo) {
@@ -4069,16 +3971,17 @@
     else if (tabs.selection === tabStage) rebuildStageTree();
   };
 
-  // タブ切替時、立ち絵タブを開いたら最新化
+  // タブ切替時に最新化（立ち絵=階層再取得 / PSD=コンポ一覧を更新）
   tabs.onChange = function () {
     if (tabs.selection === tabStage) refreshStage(true);
+    else if (tabs.selection === tabPsd) refreshPsdDropdowns();
   };
 
   // 再生ヘッド追従: パネルがアクティブになったら、既存ボタンのグリフ/有効状態だけ
   // その場で更新する（ボタンを作り直さないので「2回クリック」問題は起きない）。
   win.onActivate = function () {
     try {
-      if (tabs.selection === tabStage) syncStageGlyphs();
+      if (tabs.selection === tabStage) syncStageControls();
     } catch (e) {}
   };
 
