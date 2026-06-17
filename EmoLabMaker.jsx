@@ -1,13 +1,14 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.9.3
- * @description 立ち絵 + 口パク + PSDセットアップ + 詳細 統合パネル
+ * @version 1.9.4
+ * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
- *                 * / ! はコンポにも適用。上位未選択の階層はグレーアウト。選択肢は幅で折り返す
+ *                 * / ! はコンポにも適用。上位未選択や ! はグレーアウト。折り返し+縦スクロール対応
  *   Tab "口パク" : labファイルを解析して音素レイヤーを生成 + 口形状マッピング (PSDToolKit互換)
- *   Tab "PSD"    : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ + 目パチ
- *   Tab "詳細"   : 指定レイヤーを登録し、任意の場所のマーカーで表示を切り替える低レベル編集 + 表情セット
+ *   Tab "目パチ" : 開き/中間/閉じ目を割り当てて自動まばたきを設定
+ *   Tab "PSD"    : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
+ *   Tab "詳細"   : PSDToolKit を使わない手動・単一選択向けのレガシーモード（低レベル編集 + 表情セット）
  */
 
 (function emoLabMaker(thisObj) {
@@ -82,9 +83,10 @@
   var tabs = win.add("tabbedpanel");
   tabs.alignment = ["fill", "fill"];
 
-  // 表示順は作業フロー基準: 立ち絵(日常のハブ) → 口パク → PSD(初期セットアップ) → 詳細(旧レイヤー選択)
+  // 表示順は作業フロー基準: 立ち絵(日常のハブ) → 口パク → 目パチ → PSD(初期セットアップ) → 詳細(旧レイヤー選択)
   var tabStage = tabs.add("tab", undefined, "立ち絵");
   var tabLab = tabs.add("tab", undefined, "口パク");
+  var tabBlink = tabs.add("tab", undefined, "目パチ");
   var tabPsd = tabs.add("tab", undefined, "PSD");
   var tabSelector = tabs.add("tab", undefined, "詳細");
 
@@ -92,6 +94,11 @@
   tabSelector.alignChildren = ["fill", "top"];
   tabSelector.spacing = 8;
   tabSelector.margins = 8;
+
+  tabBlink.orientation = "column";
+  tabBlink.alignChildren = ["fill", "top"];
+  tabBlink.spacing = 8;
+  tabBlink.margins = 8;
 
   tabLab.orientation = "column";
   tabLab.alignChildren = ["fill", "top"];
@@ -2955,7 +2962,7 @@
     return lines.join("\n");
   }
 
-  var blinkPanel = tabPsd.add("panel", undefined, "目パチ (自動まばたき)");
+  var blinkPanel = tabBlink.add("panel", undefined, "目パチ (自動まばたき)");
   blinkPanel.orientation = "column";
   blinkPanel.alignChildren = ["fill", "top"];
   blinkPanel.alignment = ["fill", "top"];
@@ -3347,6 +3354,7 @@
 
       var radio = [];
       var optional = [];
+      var forced = [];
       var nodeCtrlName = null;
       var children = [];
       var childDepth = isRoot ? depth : depth + 1;
@@ -3374,8 +3382,13 @@
         } else if (parsed.exclusive) {
           // * はリーフでもフォルダでも radio choice（フォルダは下のサブ階層切替も兼ねる）
           radio.push({ fullName: layer.name, label: parsed.base, layer: layer });
-        } else if (!isFolder && !parsed.forced) {
-          // 無印リーフ = 任意指定。! リーフ・無印/! フォルダは choice にしない
+        } else if (parsed.forced) {
+          // ! 強制表示。リーフのみ情報として出す（グレーアウト）。フォルダはコンテナ
+          if (!isFolder) {
+            forced.push({ fullName: layer.name, label: parsed.base, layer: layer });
+          }
+        } else if (!isFolder) {
+          // 無印リーフ = 任意指定。無印/! フォルダは choice にしない
           optional.push({ fullName: layer.name, label: parsed.base, layer: layer });
         }
 
@@ -3395,7 +3408,7 @@
         }
       }
 
-      var hasOwn = radio.length > 0 || optional.length > 0;
+      var hasOwn = radio.length > 0 || optional.length > 0 || forced.length > 0;
       var out = [];
       var emit = isRoot ? hasOwn : hasOwn || children.length > 0;
       if (emit) {
@@ -3405,6 +3418,7 @@
           displayName: comp.name,
           radioChoices: radio,
           optionalChoices: optional,
+          forcedChoices: forced,
           ctrlCompName: nodeCtrlName,
           ctrlComp: null,
           visibleSet: [],
@@ -3497,11 +3511,14 @@
   stageGridPanel.alignment = ["fill", "fill"];
   stageGridPanel.margins = PANEL_MARGIN;
 
+  // 縦に溢れたときのスクロール用: 中身(stageGrid)を上下に動かし、パネルでクリップする。
   var stageGrid = stageGridPanel.add("group");
   stageGrid.orientation = "column";
-  stageGrid.alignChildren = ["fill", "top"];
-  stageGrid.alignment = ["fill", "fill"];
+  stageGrid.alignChildren = ["left", "top"];
   stageGrid.spacing = GRID_SPACING;
+
+  var stageScroll = stageGridPanel.add("scrollbar", undefined, 0, 0, 100);
+  stageScroll.visible = false;
 
   var stageStatusText = tabStage.add(
     "statictext",
@@ -3515,6 +3532,16 @@
   var stageCollapsed = {};
   var stageCtrlComp = null;
   var isRebuildingStage = false;
+  var stageScrollValue = 0;
+
+  // スクロールバー操作: 中身を上下に移動（再構築せず軽量）
+  stageScroll.onChanging = stageScroll.onChange = function () {
+    try {
+      var m = getPanelMarginOf(stageGridPanel);
+      stageScrollValue = stageScroll.value;
+      stageGrid.location = [m, m - stageScroll.value];
+    } catch (e) {}
+  };
 
   function setStageStatus(text) {
     stageStatusText.text = text;
@@ -3553,12 +3580,14 @@
         empty.alignment = ["fill", "top"];
         stageGrid.layout.layout(true);
         stageGridPanel.layout.layout(true);
+        applyStageScroll(0);
         return;
       }
 
       var collapseDepth = -1;
       var panelW = stageGridPanel.size ? stageGridPanel.size.width : 360;
-      var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2;
+      // スクロールバー分(約18px)を差し引いた幅で折り返す
+      var availBase = panelW - getPanelMarginOf(stageGridPanel) * 2 - 18;
 
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
@@ -3617,6 +3646,9 @@
         for (rr = 0; rr < node.optionalChoices.length; rr++) {
           items.push({ ch: node.optionalChoices[rr], kind: "opt" });
         }
+        for (rr = 0; rr < node.forcedChoices.length; rr++) {
+          items.push({ ch: node.forcedChoices[rr], kind: "forced" });
+        }
 
         var choiceIndent = indent + 26;
         // 折り返し幅は控えめに見積もる（はみ出し防止のため安全マージンを引く）
@@ -3667,6 +3699,12 @@
                 setStageStatus(nd.displayName + ": " + it.ch.label);
                 refreshStage(false);
               };
+            } else if (it.kind === "forced") {
+              // ! 常時表示。情報として出すが操作不可（グレーアウト）
+              var fcb = parentRow.add("checkbox", undefined, it.ch.label);
+              fcb.value = true;
+              fcb.enabled = false;
+              fcb.helpTip = it.ch.fullName + "（常に表示 !）";
             } else {
               var cbx = parentRow.add("checkbox", undefined, it.ch.label);
               cbx.value = on;
@@ -3701,9 +3739,36 @@
 
       stageGrid.layout.layout(true);
       stageGridPanel.layout.layout(true);
+      applyStageScroll(stageScrollValue);
     } finally {
       isRebuildingStage = false;
     }
+  }
+
+  // ツリーのスクロール: 中身(stageGrid)を上下に動かし、パネルでクリップする。
+  function applyStageScroll(value) {
+    try {
+      var m = getPanelMarginOf(stageGridPanel);
+      var pw = stageGridPanel.size ? stageGridPanel.size.width : 360;
+      var ph = stageGridPanel.size ? stageGridPanel.size.height : 200;
+      var sbW = 14;
+      var innerH = ph - m * 2;
+      var contentH = stageGrid.size ? stageGrid.size.height : 0;
+      var maxv = contentH - innerH;
+      if (maxv < 0) maxv = 0;
+      if (value === undefined || value === null || value < 0) value = 0;
+      if (value > maxv) value = maxv;
+      stageScrollValue = value;
+
+      stageScroll.location = [pw - sbW - m, m];
+      stageScroll.size = [sbW, innerH];
+      stageScroll.minvalue = 0;
+      stageScroll.maxvalue = maxv > 0 ? maxv : 1;
+      stageScroll.value = value;
+      stageScroll.visible = maxv > 0;
+
+      stageGrid.location = [m, m - value];
+    } catch (e) {}
   }
 
   // 設定済み（[Emo] 制御レイヤーを持つ）コンポだけを列挙する
