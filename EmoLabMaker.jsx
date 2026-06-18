@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.14.0
+ * @version 1.15.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -2164,6 +2164,7 @@
 
     // 全行のレイヤーを items 化して一括適用
     var items = [];
+    var mappedNames = {};
     for (var i = 0; i < mouthRows.length; i++) {
       var row = mouthRows[i];
       var myCsv = row.tokens.join(",");
@@ -2174,6 +2175,30 @@
           myCsv: myCsv,
           isClosedFallback: isClosedFallback,
         });
+        try {
+          mappedNames[row.layers[j].name] = true;
+        } catch (eNm) {}
+      }
+    }
+
+    // グループ優先: 同じコンポ内の「他の表情登録済み口レイヤー」も発話中は隠す
+    // （myCsv 空＝どの音素にも一致しないので発話中は非表示、無音中は表情に従う）。
+    // これで「口パクの口」と「立ち絵で選んだ休め口」が二重に出るのを防ぐ。
+    var suppressCount = 0;
+    if (activeComp) {
+      for (var s = 1; s <= activeComp.numLayers; s++) {
+        var sly = activeComp.layer(s);
+        if (isSystemLayerName(sly.name)) continue;
+        if (mappedNames[sly.name]) continue;
+        if (!isRegistered(sly)) continue; // 表情登録済みのみ対象
+        if (
+          hasOpacitySignature(sly, LAB_MAP_SIGNATURE) ||
+          hasOpacitySignature(sly, BLINK_SIGNATURE)
+        ) {
+          continue; // 既に口パク/目パチ済みは触らない
+        }
+        items.push({ layer: sly, myCsv: "", isClosedFallback: false });
+        suppressCount++;
       }
     }
 
@@ -2196,6 +2221,12 @@
     if (emoLinkedCount > 0) {
       message +=
         "\n表情切替と共存: " + emoLinkedCount + " レイヤー（非発話中は表情に従います）";
+    }
+    if (suppressCount > 0) {
+      message +=
+        "\nグループ優先: 他 " +
+        suppressCount +
+        " レイヤーを発話中は非表示にしました（休め口の二重表示を防止）";
     }
     if (staleCount > 0) {
       message +=
@@ -2883,6 +2914,42 @@
   }
 
   /**
+   * グループコンポを oldName → newName にリネームした際、参照を移行する。
+   *   1) 制御コンポ内の制御レイヤー [Emo] oldName を [Emo] newName にリネーム
+   *      （マーカー＝表情/口形の選択履歴を保持したまま新名へ引き継ぐ）
+   *   2) このコンポ内レイヤーの式に焼き込まれた旧コンポ名参照を新名へ置換
+   *      （登録済み emo はこの後 registerLayers で作り直されるが、保持される
+   *        口パク/目パチの合成式は作り直されないため、ここで直す必要がある）
+   */
+  function migrateGroupRename(comp, ctrlComp, oldName, newName) {
+    if (!comp || !ctrlComp || oldName === newName) return;
+    var oldCtrl = getCtrlLayerName(oldName);
+    var newCtrl = getCtrlLayerName(newName);
+    try {
+      for (var i = 1; i <= ctrlComp.numLayers; i++) {
+        var cl = ctrlComp.layer(i);
+        if (cl.name === oldCtrl) cl.name = newCtrl; // マーカー保持のままリネーム
+      }
+    } catch (e) {}
+    var oldEsc = escapeExprStr(oldName);
+    var newEsc = escapeExprStr(newName);
+    for (var j = 1; j <= comp.numLayers; j++) {
+      var ly = comp.layer(j);
+      var ex;
+      try {
+        ex = ly.transform.opacity.expression;
+      } catch (e2) {
+        continue;
+      }
+      if (ex && ex.indexOf(oldEsc) >= 0) {
+        try {
+          ly.transform.opacity.expression = ex.split(oldEsc).join(newEsc);
+        } catch (e3) {}
+      }
+    }
+  }
+
+  /**
    * 同一コンポ内の重複レイヤー名に「 (2)」「 (3)」を付けて一意化する。
    * エクスプレッションもマーカーもレイヤー名一致で動くため、
    * コンポ内の重複は誤マッチの原因になる
@@ -2949,8 +3016,14 @@
         var group = groups[g];
         var comp = group.comp;
 
+        var oldCompName = comp.name;
         var compRename = uniquifyGroupCompName(rootComp, comp);
-        if (compRename) report.renamedComps.push(compRename);
+        if (compRename) {
+          report.renamedComps.push(compRename);
+          // リネームで参照が壊れないよう、制御レイヤー名とこのコンポ内の式の
+          // 旧コンポ名参照を新名へ移行する（口パク/目パチの保持式・マーカーを守る）
+          migrateGroupRename(comp, ctrlComp, oldCompName, comp.name);
+        }
 
         // プレフィックス（* / !）は剥がさず保持する（種別を名前から判別できるように）。
         // 同名重複だけは誤マッチ防止のためリネームする
