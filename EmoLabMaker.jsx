@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.15.1
+ * @version 1.15.2
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -82,25 +82,71 @@
     return comps;
   }
 
-  // 現在開いているコンポと、その中にネストされたコンポを再帰収集する。
-  // （PSDタブの選択肢を「開いている立ち絵の中身だけ」に絞るため）
-  function collectCompTree(rootComp) {
-    var out = [];
-    var seen = {};
-    function walk(comp) {
-      if (!comp || seen[comp.id]) return;
-      seen[comp.id] = true;
-      out.push(comp);
-      for (var i = 1; i <= comp.numLayers; i++) {
-        var src = null;
-        try {
-          src = comp.layer(i).source;
-        } catch (e) {}
-        if (src && src instanceof CompItem) walk(src);
+  // ── PSD 立ち絵ルートコンポの判定（PSDタブのドロップダウン用） ──
+  // AE の PSD 取り込み（コンポジション）は「<名前> レイヤー / <name> Layers」
+  // フォルダを作る。これがあれば PSD 由来のルートコンポと判定できる。
+  function hasPsdLayersFolder(comp) {
+    if (!comp || !app.project) return false;
+    var base = comp.name;
+    for (var i = 1; i <= app.project.numItems; i++) {
+      var it = app.project.item(i);
+      if (
+        it instanceof FolderItem &&
+        (it.name === base + " レイヤー" || it.name === base + " Layers")
+      ) {
+        return true;
       }
     }
-    walk(rootComp);
-    return out;
+    return false;
+  }
+
+  // コンポ内に .psd 由来のフッテージレイヤーがあるか
+  function hasPsdFootage(comp) {
+    try {
+      for (var i = 1; i <= comp.numLayers; i++) {
+        var src = comp.layer(i).source;
+        if (src && src.mainSource && src.mainSource.file) {
+          var nm = String(src.mainSource.file.name || "").toLowerCase();
+          if (nm.length >= 4 && nm.substring(nm.length - 4) === ".psd") {
+            return true;
+          }
+        }
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  function isItemAtProjectRoot(comp) {
+    try {
+      return comp.parentFolder === app.project.rootFolder;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // PSDタブに出す候補 = プロジェクト直下のコンポのうち、
+  // PSD 由来（レイヤーフォルダ or .psd フッテージ）か、セットアップ済み（[Emo]）のもの。
+  // 検出できなければ直下コンポ全部 → それも無ければアクティブコンポにフォールバック。
+  function collectPsdRootCandidates() {
+    var all = getProjectComps();
+    var out = [];
+    var rootLevel = [];
+    var i;
+    for (i = 0; i < all.length; i++) {
+      if (!isItemAtProjectRoot(all[i])) continue;
+      rootLevel.push(all[i]);
+      if (
+        hasPsdLayersFolder(all[i]) ||
+        hasPsdFootage(all[i]) ||
+        hasCtrlPrefixedLayer(all[i])
+      ) {
+        out.push(all[i]);
+      }
+    }
+    if (out.length > 0) return out;
+    if (rootLevel.length > 0) return rootLevel;
+    var ac = getActiveComp();
+    return ac ? [ac] : [];
   }
 
   function findCompByName(name) {
@@ -1069,9 +1115,8 @@
 
   // PSDタブ用: 現在開いているコンポとその中身（ネストされたコンポ）だけを列挙する
   function rebuildPsdDropdown(dropdown, selectedName) {
-    // 現在開いているコンポのみを表示する（ネストや無関係なコンポは出さない）。
-    var root = getActiveComp();
-    var comps = root ? [root] : [];
+    // PSD 立ち絵ルート候補のみを表示する（プロジェクト直下の PSD 由来/設定済みコンポ）。
+    var comps = collectPsdRootCandidates();
     dropdown.removeAll();
     for (var i = 0; i < comps.length; i++) {
       dropdown.add("item", comps[i].name);
@@ -3352,7 +3397,8 @@
   }
 
   var psdRootRow = addPsdCompRow("ルート");
-  psdRootRow.dropdown.helpTip = "読み込んだ PSD のルートコンポ";
+  psdRootRow.dropdown.helpTip =
+    "PSD から読み込んだ立ち絵ルートコンポ（プロジェクト直下の PSD 由来/設定済みコンポのみ表示）";
 
   var psdRefreshBtn = psdRootRow.row.add("button", undefined, "↺");
   psdRefreshBtn.preferredSize = [24, BUTTON_HEIGHT];
@@ -3771,15 +3817,15 @@
       : null;
     rebuildPsdDropdown(psdRootRow.dropdown, rootCur);
     rebuildPsdDropdown(psdCtrlRow.dropdown, ctrlCur);
-    if (!getActiveComp()) {
+    if (psdRootRow.dropdown.items.length === 0) {
       psdStatusText.text =
-        "コンポを開いてからこのタブを開いてください（開いているコンポの中身だけを表示します）。";
+        "PSD 立ち絵コンポが見つかりません。PSD を「コンポジション」として読み込んでください。";
     }
   }
 
   psdRefreshBtn.onClick = function () {
     refreshPsdDropdowns();
-    psdStatusText.text = "コンポ一覧を更新しました（開いているコンポの中身のみ）。";
+    psdStatusText.text = "コンポ一覧を更新しました（PSD 立ち絵ルート候補のみ）。";
   };
 
   // ルート変更時は制御コンポも同じものをデフォルトにする
