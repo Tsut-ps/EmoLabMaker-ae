@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.15.2
+ * @version 1.16.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -62,6 +62,8 @@
   var cfgLabOffsetMs = getSettingNum("labOffsetMs", 0); // 全体シフト（映像先行）
   var cfgLabHeadMs = getSettingNum("labHeadMs", 0); // 開始を遅らせる前マージン
   var cfgLabTailMs = getSettingNum("labTailMs", 0); // 終了を早める後トリム
+  // ラボの終了時刻に「閉じ音素」を自動追加（末尾の口が開いたまま残るのを防ぐ）
+  var cfgLabAutoClose = getSettingBool("labAutoClose", true);
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -1635,14 +1637,18 @@
     return entries;
   }
 
+  // 発話終了時に打つ「閉じ音素」。どの母音にも属さない pau を使い、閉じ口へ戻す。
+  var LAB_CLOSE_PHONEME = "pau";
+
   /**
    * targetLayer に音素マーカーを配置する（既存マーカーは全削除してから）。
    * selectedPhonemes は {startTime,endTime,phoneme} の配列（開始時間順）。
-   * headSec/tailSec が指定され、かつ targetLayer がヌル（音声/映像を持たない）なら、
-   * レイヤーの in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める。
-   * （findPhonemeLayer が範囲外を無視するので、範囲外は閉じ口/立ち絵に戻る）
-   * 音声・映像レイヤーは音を切らないよう in/out を変更せずスキップする。
-   * 戻り値: { trimmed: bool, hasMedia: bool }
+   *   autoClose: ラボ終了時刻（最後の endTime）に閉じ音素を自動追加し、
+   *              発話後に口を閉じる（末尾の口が開いたまま残るのを防ぐ）。
+   *   headSec/tailSec: [Lab] の in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める
+   *     （範囲外は findPhonemeLayer が無視＝閉じ口/立ち絵に戻る）。音声・映像
+   *     レイヤーでも適用するため音声の頭/尾も同じだけ切れる。
+   * 戻り値: { trimmed: bool, hasMedia: bool, autoClosed: bool }
    */
   function writeLabMarkers(
     targetLayer,
@@ -1651,7 +1657,8 @@
     selectedPhonemes,
     offsetSec,
     headSec,
-    tailSec
+    tailSec,
+    autoClose
   ) {
     var markers = targetLayer.property("Marker");
     for (var i = markers.numKeys; i >= 1; i--) {
@@ -1659,6 +1666,7 @@
     }
     var firstTime = null;
     var lastTime = null;
+    var maxEndRel = null; // ラボ終了の相対時刻（最大 endTime - labStart）
     for (var k = 0; k < selectedPhonemes.length; k++) {
       var markerTime =
         attachTime + (selectedPhonemes[k].startTime - labStartTime) + offsetSec;
@@ -1667,6 +1675,21 @@
         .setValueAtTime(markerTime, new MarkerValue(selectedPhonemes[k].phoneme));
       if (firstTime === null) firstTime = markerTime;
       lastTime = markerTime;
+      var endRel = selectedPhonemes[k].endTime - labStartTime;
+      if (maxEndRel === null || endRel > maxEndRel) maxEndRel = endRel;
+    }
+
+    // ラボ終了が明確なら、その時刻に閉じ音素を打って発話後に口を閉じる
+    var closeTime = null;
+    var autoClosed = false;
+    if (firstTime !== null && maxEndRel !== null) {
+      closeTime = attachTime + maxEndRel + offsetSec;
+      if (autoClose && closeTime > lastTime + MARKER_EPSILON) {
+        targetLayer
+          .property("Marker")
+          .setValueAtTime(closeTime, new MarkerValue(LAB_CLOSE_PHONEME));
+        autoClosed = true;
+      }
     }
 
     headSec = headSec || 0;
@@ -1678,9 +1701,10 @@
     var trimmed = false;
     if ((headSec > 0 || tailSec > 0) && firstTime !== null) {
       // in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める（範囲外は閉じ口/立ち絵）。
-      // 音声・映像レイヤーでも適用するため、音声の頭/尾も同じだけ切れる点に注意。
+      // 終端はラボ終了(closeTime)を基準にする。
+      var endBase = closeTime !== null ? closeTime : lastTime;
       var newIn = firstTime + headSec;
-      var newOut = lastTime - tailSec;
+      var newOut = endBase - tailSec;
       if (newOut > newIn) {
         try {
           targetLayer.inPoint = newIn;
@@ -1689,7 +1713,7 @@
         } catch (e2) {}
       }
     }
-    return { trimmed: trimmed, hasMedia: hasMedia };
+    return { trimmed: trimmed, hasMedia: hasMedia, autoClosed: autoClosed };
   }
 
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
@@ -1958,6 +1982,19 @@
   offsetInput.onChange = readLabTimings;
   headInput.onChange = readLabTimings;
   tailInput.onChange = readLabTimings;
+
+  var autoCloseCheck = offsetGroup.add(
+    "checkbox",
+    undefined,
+    "終了に閉じ口"
+  );
+  autoCloseCheck.value = cfgLabAutoClose;
+  autoCloseCheck.helpTip =
+    "ラボの終了時刻に閉じ音素(pau)を自動追加し、発話後に口を閉じる（末尾の口が開いたまま残るのを防ぐ）";
+  autoCloseCheck.onClick = function () {
+    cfgLabAutoClose = autoCloseCheck.value;
+    setSettingBool("labAutoClose", cfgLabAutoClose);
+  };
 
   // ========== 口形状マッピング (PSDToolKit互換) ==========
   // あ/い/う/え/お/ん の口形レイヤーに音素グループを割り当てる。
@@ -2584,7 +2621,8 @@
       // タイミング設定を取得（ミリ秒→秒）。読み取り時に永続化もされる
       var t = readLabTimings();
 
-      // 既存マーカーを削除して配置（共通関数）。ヌル [Lab] なら頭/尾で in/out を詰める
+      // 既存マーカーを削除して配置（共通関数）。頭/尾で in/out を詰め、
+      // 終了が明確なら閉じ音素を自動追加する
       var placeResult = writeLabMarkers(
         targetLayer,
         attachTime,
@@ -2592,7 +2630,8 @@
         selectedPhonemes,
         t.offsetSec,
         t.headSec,
-        t.tailSec
+        t.tailSec,
+        cfgLabAutoClose
       );
     } finally {
       endUndo();
@@ -2615,6 +2654,9 @@
           message += "（音声・映像レイヤーのため音声も同じだけ切れます）";
         }
       }
+    }
+    if (placeResult && placeResult.autoClosed) {
+      message += "\n終了に閉じ口(pau)を自動追加しました";
     }
     alert(message);
   };
