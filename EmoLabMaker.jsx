@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.12.0
+ * @version 1.13.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -1086,8 +1086,9 @@
 
   // PSDタブ用: 現在開いているコンポとその中身（ネストされたコンポ）だけを列挙する
   function rebuildPsdDropdown(dropdown, selectedName) {
+    // 現在開いているコンポのみを表示する（ネストや無関係なコンポは出さない）。
     var root = getActiveComp();
-    var comps = root ? collectCompTree(root) : [];
+    var comps = root ? [root] : [];
     dropdown.removeAll();
     for (var i = 0; i < comps.length; i++) {
       dropdown.add("item", comps[i].name);
@@ -2794,18 +2795,41 @@
   }
 
   /**
-   * グループコンポ名を「<ルートコンポ名>_<グループ名>」へ一意化する。
-   * エクスプレッションの comp("名前") はプロジェクト全体から名前で参照する
-   * ため、複数キャラの PSD で「目」「口」が衝突しないようにする。
-   * 前置済みなら何もしない（冪等）
+   * グループコンポ名をプロジェクト全体で「一意」にする。
+   * エクスプレッションの comp("名前") と制御レイヤー名 [Emo] <名前> は
+   * 名前で参照するため、同名コンポがあると別グループが同じ制御マーカーを
+   * 共有して干渉する。ルート名を前置し、なお衝突するなら連番を付ける。
+   * 既に前置済みで一意なら何もしない（冪等）。
    */
+  function compNameTaken(name, selfComp) {
+    var comps = getProjectComps();
+    for (var i = 0; i < comps.length; i++) {
+      if (comps[i].id !== selfComp.id && comps[i].name === name) return true;
+    }
+    return false;
+  }
+
+  function makeUniqueCompName(base, selfComp) {
+    if (!compNameTaken(base, selfComp)) return base;
+    var n = 2;
+    while (compNameTaken(base + " " + n, selfComp)) n++;
+    return base + " " + n;
+  }
+
   function uniquifyGroupCompName(rootComp, groupComp) {
     if (groupComp === rootComp || groupComp.id === rootComp.id) return null;
     var prefix = rootComp.name + "_";
-    if (groupComp.name.indexOf(prefix) === 0) return null;
+    var desired = groupComp.name;
+    if (desired.indexOf(prefix) !== 0) desired = prefix + desired;
+    // 既にこの名前で、かつ他に同名コンポが無ければそのまま（冪等）
+    if (desired === groupComp.name && !compNameTaken(groupComp.name, groupComp)) {
+      return null;
+    }
+    var unique = makeUniqueCompName(desired, groupComp);
+    if (unique === groupComp.name) return null;
     var oldName = groupComp.name;
-    groupComp.name = prefix + groupComp.name;
-    return oldName + " → " + groupComp.name;
+    groupComp.name = unique;
+    return oldName + " → " + unique;
   }
 
   /**
@@ -3936,25 +3960,30 @@
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
-  // ── グローバル反転（:flipx/:flipy のペアを一括スワップ） ──
-  // PSDToolKit の反転は立ち絵全体の状態。反転ペアを持つ立ち絵でのみ表示する。
+  // ── 反転（立ち絵全体を Scale でミラー。左右/上下を独立トグル） ──
   var stageFlipRow = tabStage.add("group");
   stageFlipRow.orientation = "row";
   stageFlipRow.alignment = ["fill", "top"];
   stageFlipRow.alignChildren = ["left", "center"];
-  stageFlipRow.spacing = 4;
+  stageFlipRow.spacing = 8;
   stageFlipRow.add("statictext", undefined, "反転");
-  var stageFlipXBtn = stageFlipRow.add("button", undefined, "↔ 左右");
-  stageFlipXBtn.preferredSize = [64, BUTTON_HEIGHT];
-  stageFlipXBtn.helpTip = "表示中のペアを :flipx（左右反転）側へ一括切替";
-  var stageFlipYBtn = stageFlipRow.add("button", undefined, "↕ 上下");
-  stageFlipYBtn.preferredSize = [64, BUTTON_HEIGHT];
-  stageFlipYBtn.helpTip = "表示中のペアを :flipy（上下反転）側へ一括切替";
-  var stageFlipNoneBtn = stageFlipRow.add("button", undefined, "通常");
-  stageFlipNoneBtn.preferredSize = [52, BUTTON_HEIGHT];
-  stageFlipNoneBtn.helpTip = "反転を解除して通常レイヤーへ戻す";
-  var stageFlipInfo = stageFlipRow.add("statictext", undefined, "（通常）");
-  stageFlipInfo.alignment = ["fill", "center"];
+  var cbFlipX = stageFlipRow.add("checkbox", undefined, "左右反転");
+  cbFlipX.helpTip = "立ち絵全体を左右反転（Scale X を -100%）";
+  var cbFlipY = stageFlipRow.add("checkbox", undefined, "上下反転");
+  cbFlipY.helpTip = "立ち絵全体を上下反転（Scale Y を -100%）";
+  function onStageFlipToggle() {
+    var st =
+      cbFlipX.value && cbFlipY.value
+        ? "flipxy"
+        : cbFlipX.value
+        ? "flipx"
+        : cbFlipY.value
+        ? "flipy"
+        : "";
+    applyStageFlip(st);
+  }
+  cbFlipX.onClick = onStageFlipToggle;
+  cbFlipY.onClick = onStageFlipToggle;
   stageFlipRow.visible = false;
 
   // 表情セット（ツリーの上に配置）
@@ -4529,14 +4558,12 @@
 
     setCheckState(stageCtrlInfo, stageNodes.length > 0);
 
-    // 反転ペアを持つ立ち絵のときだけ反転コントロールを出す
-    var hasFlip = collectFlipSuffixes(stageNodes).length > 0;
-    stageFlipRow.visible = hasFlip;
+    // 反転は立ち絵があれば常に使える（単純な Scale ミラー）
+    stageFlipRow.visible = stageNodes.length > 0;
     // 反転状態はルートコンポの comment が真実（再読込しても保持）
     stageFlipState = readFlipState(rootComp);
-    stageFlipInfo.text = stageFlipState
-      ? "反転中 " + flipGlyph(stageFlipState)
-      : "（通常）";
+    cbFlipX.value = flipHasX(stageFlipState);
+    cbFlipY.value = flipHasY(stageFlipState);
 
     rebuildStageTree();
     rebuildStageEmoSetDropdown(
@@ -4563,11 +4590,10 @@
       "4. 上位コンポが選択されていない階層はグレーアウトします",
       "5. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
       "",
-      "【反転 (:flipx/:flipy)】ヘッダの「↔ 左右 / ↕ 上下 / 通常」で立ち絵全体を反転します",
+      "【反転】「左右反転 / 上下反転」のチェックで立ち絵全体を Scale ミラーします",
       "  - ルートコンポの最上位レイヤーを中心線でミラー（Scale 反転＋位置を中心線で反転）",
-      "    静的な値の書き換えだけなので描画は重くなりません（負荷ゼロ）",
-      "  - 同時に、手描きの反転ペア（通常名 / 通常名:flipx）がある所はその flip 側へ差替",
-      "  - 反転状態はルートコンポのコメントに記録（2回押しても二重反転せず、通常で戻る）",
+      "    静的な値の書き換えだけなので描画は重くなりません（負荷ゼロ）。各軸は独立トグル",
+      "  - 反転状態はルートコンポのコメントに記録（再読込しても保持）",
       "  ※ 最上位レイヤーにキーフレーム/式/親子付けがあると正しくミラーできない場合あり",
       "",
       "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
@@ -4589,16 +4615,6 @@
 
   stageHelpBtn.onClick = function () {
     showStageHelpDialog();
-  };
-
-  stageFlipXBtn.onClick = function () {
-    applyStageFlip("flipx");
-  };
-  stageFlipYBtn.onClick = function () {
-    applyStageFlip("flipy");
-  };
-  stageFlipNoneBtn.onClick = function () {
-    applyStageFlip("");
   };
 
   stageRootDropdown.onChange = function () {
