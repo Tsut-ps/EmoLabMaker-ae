@@ -2671,26 +2671,37 @@
     return null;
   }
 
-  // 反転状態は調整レイヤー [EmoFlip] の scale 符号そのものが真実。
-  // （comment や JS メモリに頼らず冪等。再読込でも保持される）
+  // 反転状態は調整レイヤー [EmoFlip] の「有効＋scale 符号」が真実。
+  // 通常状態では無効化（目オフ）して描画から外すため、未反転時は負荷ゼロ。
   function readFlipState(comp) {
     var lay = findFlipLayer(comp);
     if (!lay) return "";
     try {
+      if (lay.enabled === false) return ""; // 無効＝通常
+    } catch (e) {}
+    try {
       return flipStateFromScale(lay.transform.scale.value);
-    } catch (e) {
+    } catch (e2) {
       return "";
     }
   }
 
   // root comp 最上段の調整レイヤーで「合成結果ごと」中心線ミラーする。
   // 個々のレイヤーのキーフレーム/式/親子付けに影響されないのが利点。
-  // 反転レイヤーはコンポ中心アンカーのため、scale 反転で中心線ミラーになる。
+  // 通常状態(state="")では調整レイヤーを無効化＝描画から外し負荷ゼロにする。
   function setCompFlip(comp, state) {
     if (!comp) return false;
     var lay = findFlipLayer(comp);
+    if (!state) {
+      // 通常へ戻す: レイヤーがあれば無効化（無ければ何もしない）
+      if (lay) {
+        try {
+          lay.enabled = false;
+        } catch (e) {}
+      }
+      return true;
+    }
     if (!lay) {
-      if (!state) return false; // 通常状態でレイヤーも無ければ何もしない
       try {
         lay = comp.layers.addSolid(
           [0, 0, 0],
@@ -2700,14 +2711,15 @@
           1
         );
         lay.adjustmentLayer = true;
-        lay.moveToBeginning(); // 最上段＝下の全レイヤーに作用
-      } catch (e) {
+      } catch (e2) {
         return false;
       }
     }
     try {
+      lay.moveToBeginning(); // 最上段＝下の全レイヤーに作用
+      lay.enabled = true;
       lay.transform.scale.setValue(flipScaleFor(state));
-    } catch (e2) {}
+    } catch (e3) {}
     return true;
   }
 
@@ -4550,7 +4562,8 @@
       "  - ルートコンポ最上段に調整レイヤー [EmoFlip] を置き、合成結果ごと中心線でミラー",
       "    （個々のレイヤーのキーフレーム/式/親子付けに影響されません）",
       "  - 同時に、手描きの反転ペア（通常名 / 通常名:flipx）がある所はその flip 側へ差替",
-      "  - 反転状態は [EmoFlip] の scale 符号が真実（2回押しても二重反転せず、通常で戻る）",
+      "  - 「通常」に戻すと [EmoFlip] を無効化＝描画から外すので、未反転時は負荷ゼロ",
+      "  - 反転状態は [EmoFlip] の有効＋scale が真実（2回押しても二重反転せず、通常で戻る）",
       "",
       "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
       "（取れない場合は「更新」。ScriptUI は再生ヘッド移動を直接検知できません）。",
