@@ -2649,78 +2649,74 @@
     return state === "flipy" || state === "flipxy";
   }
 
-  // 反転状態 ⇔ 調整レイヤーの scale 値（純粋・テスト可能）
+  // 旧版（調整レイヤー方式）が作ったレイヤー。掃除用に名前だけ保持する。
+  // ※調整レイヤーの「レイヤー自身の Scale」は下の合成結果を変形しない
+  //   （＝反転にならない）ため、直接ミラー方式に戻した。
   var FLIP_LAYER_NAME = "[EmoFlip]";
-  function flipScaleFor(state) {
-    return [flipHasX(state) ? -100 : 100, flipHasY(state) ? -100 : 100];
-  }
-  function flipStateFromScale(sc) {
-    var x = sc[0] < 0;
-    var y = sc[1] < 0;
-    if (x && y) return "flipxy";
-    if (x) return "flipx";
-    if (y) return "flipy";
-    return "";
-  }
-
-  function findFlipLayer(comp) {
-    if (!comp) return null;
-    for (var i = 1; i <= comp.numLayers; i++) {
-      if (comp.layer(i).name === FLIP_LAYER_NAME) return comp.layer(i);
-    }
-    return null;
-  }
-
-  // 反転状態は調整レイヤー [EmoFlip] の「有効＋scale 符号」が真実。
-  // 通常状態では無効化（目オフ）して描画から外すため、未反転時は負荷ゼロ。
-  function readFlipState(comp) {
-    var lay = findFlipLayer(comp);
-    if (!lay) return "";
-    try {
-      if (lay.enabled === false) return ""; // 無効＝通常
-    } catch (e) {}
-    try {
-      return flipStateFromScale(lay.transform.scale.value);
-    } catch (e2) {
-      return "";
-    }
-  }
-
-  // root comp 最上段の調整レイヤーで「合成結果ごと」中心線ミラーする。
-  // 個々のレイヤーのキーフレーム/式/親子付けに影響されないのが利点。
-  // 通常状態(state="")では調整レイヤーを無効化＝描画から外し負荷ゼロにする。
-  function setCompFlip(comp, state) {
-    if (!comp) return false;
-    var lay = findFlipLayer(comp);
-    if (!state) {
-      // 通常へ戻す: レイヤーがあれば無効化（無ければ何もしない）
-      if (lay) {
-        try {
-          lay.enabled = false;
-        } catch (e) {}
-      }
-      return true;
-    }
-    if (!lay) {
+  function removeFlipLayers(comp) {
+    if (!comp) return;
+    for (var i = comp.numLayers; i >= 1; i--) {
       try {
-        lay = comp.layers.addSolid(
-          [0, 0, 0],
-          FLIP_LAYER_NAME,
-          comp.width,
-          comp.height,
-          1
-        );
-        lay.adjustmentLayer = true;
-      } catch (e2) {
-        return false;
-      }
+        if (comp.layer(i).name === FLIP_LAYER_NAME) comp.layer(i).remove();
+      } catch (e) {}
     }
+  }
+
+  // 反転状態はルートコンポの comment に "emoFlip:flipx" 等として記録する（冪等）。
+  function readFlipState(comp) {
+    if (!comp) return "";
+    var c = "";
     try {
-      lay.moveToBeginning(); // 最上段＝下の全レイヤーに作用
-      lay.enabled = true;
-      lay.transform.scale.setValue(flipScaleFor(state));
-    } catch (e3) {}
-    return true;
+      c = comp.comment || "";
+    } catch (e) {}
+    var m = c.match(/emoFlip:(flipxy|flipx|flipy)/);
+    return m ? m[1] : "";
+  }
+  function writeFlipState(comp, state) {
+    if (!comp) return;
+    try {
+      var c = comp.comment || "";
+      c = c.replace(/\s*emoFlip:(flipxy|flipx|flipy)/g, "");
+      c = c.replace(/^\s+|\s+$/g, "");
+      if (state) c = (c ? c + " " : "") + "emoFlip:" + state;
+      comp.comment = c;
+    } catch (e2) {}
+  }
+
+  // root comp の最上位レイヤーをコンポ中心線でミラーする（doX=左右 / doY=上下）。
+  // scale を反転しつつ position を「幅 - x」に置換することで、アンカー位置に
+  // 関係なく中心線で正しくミラーする（worldX' = compW - worldX）。これは静的な
+  // 値の書き換えだけなので描画負荷ゼロ。システムレイヤー/ヌルはスキップ。
+  function mirrorLayersInComp(comp, doX, doY) {
+    if (!comp || (!doX && !doY)) return 0;
+    var cw = comp.width;
+    var ch = comp.height;
+    var count = 0;
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var L = comp.layer(i);
+      try {
+        if (isSystemLayerName(L.name)) continue;
+        var isNull = false;
+        try {
+          isNull = L.nullLayer === true;
+        } catch (en) {}
+        if (isNull) continue;
+        var pos = L.position.value;
+        var sc = L.scale.value;
+        if (doX) {
+          pos[0] = cw - pos[0];
+          sc[0] = -sc[0];
+        }
+        if (doY) {
+          pos[1] = ch - pos[1];
+          sc[1] = -sc[1];
+        }
+        L.position.setValue(pos);
+        L.scale.setValue(sc);
+        count++;
+      } catch (e3) {}
+    }
+    return count;
   }
 
   /**
@@ -4430,10 +4426,20 @@
     resolveStageState();
     var rootComp = getSelectedComp(stageRootDropdown);
     var changed = 0;
+    var mirrored = 0;
     beginUndo("emo2layer: 立ち絵 反転");
     try {
-      // 1) 調整レイヤーでコンポ全体を反転（scale 符号が状態の真実）
-      if (rootComp) setCompFlip(rootComp, state);
+      // 1) 直接ミラー（現在の記録状態との差分だけ適用＝冪等）
+      if (rootComp) {
+        removeFlipLayers(rootComp); // 旧版(調整レイヤー)の名残を掃除
+        var cur = readFlipState(rootComp);
+        var needX = flipHasX(state) !== flipHasX(cur);
+        var needY = flipHasY(state) !== flipHasY(cur);
+        if (needX || needY) {
+          mirrored = mirrorLayersInComp(rootComp, needX, needY);
+        }
+        writeFlipState(rootComp, state);
+      }
       // 2) 表示中ペアの差し替え
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
@@ -4488,11 +4494,10 @@
     }
     stageFlipState = state;
     refreshStage(false); // ラベルのグリフ更新のため作り直す
-    var msg = state
-      ? "反転 " + flipGlyph(state) + " を適用（調整レイヤー）"
-      : "反転を解除";
+    var msg = state ? "反転 " + flipGlyph(state) + " を適用" : "反転を解除";
+    msg += "（ミラー " + mirrored + " レイヤー";
     if (changed > 0) msg += " / ペア差替 " + changed + " 階層";
-    msg += "。";
+    msg += "）。";
     setStageStatus(msg);
   }
 
@@ -4559,11 +4564,11 @@
       "5. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
       "",
       "【反転 (:flipx/:flipy)】ヘッダの「↔ 左右 / ↕ 上下 / 通常」で立ち絵全体を反転します",
-      "  - ルートコンポ最上段に調整レイヤー [EmoFlip] を置き、合成結果ごと中心線でミラー",
-      "    （個々のレイヤーのキーフレーム/式/親子付けに影響されません）",
+      "  - ルートコンポの最上位レイヤーを中心線でミラー（Scale 反転＋位置を中心線で反転）",
+      "    静的な値の書き換えだけなので描画は重くなりません（負荷ゼロ）",
       "  - 同時に、手描きの反転ペア（通常名 / 通常名:flipx）がある所はその flip 側へ差替",
-      "  - 「通常」に戻すと [EmoFlip] を無効化＝描画から外すので、未反転時は負荷ゼロ",
-      "  - 反転状態は [EmoFlip] の有効＋scale が真実（2回押しても二重反転せず、通常で戻る）",
+      "  - 反転状態はルートコンポのコメントに記録（2回押しても二重反転せず、通常で戻る）",
+      "  ※ 最上位レイヤーにキーフレーム/式/親子付けがあると正しくミラーできない場合あり",
       "",
       "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
       "（取れない場合は「更新」。ScriptUI は再生ヘッド移動を直接検知できません）。",
