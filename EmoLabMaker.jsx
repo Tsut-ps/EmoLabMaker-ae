@@ -652,28 +652,6 @@
     return names;
   }
 
-  /** ツリー全体で使われている反転 suffix の一覧（"flipx"/"flipy"/"flipxy"） */
-  function collectFlipSuffixes(nodes) {
-    var seen = {};
-    var out = [];
-    function scan(choices) {
-      for (var i = 0; i < choices.length; i++) {
-        var fl = choices[i].flips || [];
-        for (var j = 0; j < fl.length; j++) {
-          if (!seen[fl[j].suffix]) {
-            seen[fl[j].suffix] = true;
-            out.push(fl[j].suffix);
-          }
-        }
-      }
-    }
-    for (var n = 0; n < nodes.length; n++) {
-      scan(nodes[n].radioChoices);
-      scan(nodes[n].optionalChoices);
-    }
-    return out;
-  }
-
   // ══════════════════════════════════════════════════════════════════
   // 表情セット
   // ══════════════════════════════════════════════════════════════════
@@ -2650,19 +2628,6 @@
     return state === "flipy" || state === "flipxy";
   }
 
-  // 旧版（調整レイヤー方式）が作ったレイヤー。掃除用に名前だけ保持する。
-  // ※調整レイヤーの「レイヤー自身の Scale」は下の合成結果を変形しない
-  //   （＝反転にならない）ため、直接ミラー方式に戻した。
-  var FLIP_LAYER_NAME = "[EmoFlip]";
-  function removeFlipLayers(comp) {
-    if (!comp) return;
-    for (var i = comp.numLayers; i >= 1; i--) {
-      try {
-        if (comp.layer(i).name === FLIP_LAYER_NAME) comp.layer(i).remove();
-      } catch (e) {}
-    }
-  }
-
   // 反転状態はルートコンポの comment に "emoFlip:flipx" 等として記録する（冪等）。
   function readFlipState(comp) {
     if (!comp) return "";
@@ -3774,8 +3739,7 @@
     return (
       name.indexOf(CTRL_PREFIX) === 0 ||
       name.indexOf(SET_PREFIX) === 0 ||
-      name.indexOf("[Lab] ") === 0 ||
-      name.indexOf(FLIP_LAYER_NAME) === 0
+      name.indexOf("[Lab] ") === 0
     );
   }
 
@@ -4460,7 +4424,6 @@
     try {
       // 1) 直接ミラー（現在の記録状態との差分だけ適用＝冪等）
       if (rootComp) {
-        removeFlipLayers(rootComp); // 旧版(調整レイヤー)の名残を掃除
         var cur = readFlipState(rootComp);
         var needX = flipHasX(state) !== flipHasX(cur);
         var needY = flipHasY(state) !== flipHasY(cur);
