@@ -1,10 +1,11 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.11.0
+ * @version 1.12.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
  *                 * / ! はコンポにも適用。上位未選択や ! はグレーアウト。折り返し+縦スクロール対応
+ *                 :flipx/:flipy の反転ペアはグローバル反転ボタンで base⇔flip を一括スワップ
  *   Tab "口パク" : labファイルを解析して音素レイヤーを生成 + 口形状マッピング (PSDToolKit互換)
  *   Tab "目パチ" : 開き/中間/閉じ目を割り当てて自動まばたきを設定
  *   Tab "PSD"    : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
@@ -562,6 +563,16 @@
     return writeMarkerNameAtTime(ctrlComp, targetCompName, time, next.join(","));
   }
 
+  /** 指定した名前群を集合からすべて取り除く */
+  function removeNamesFromSet(ctrlComp, targetCompName, time, names) {
+    var set = readVisibleSet(ctrlComp, targetCompName, time);
+    var next = [];
+    for (var i = 0; i < set.length; i++) {
+      if (indexOfName(names, set[i]) < 0) next.push(set[i]);
+    }
+    return writeMarkerNameAtTime(ctrlComp, targetCompName, time, next.join(","));
+  }
+
   /** layerName を集合からトグル（独立 ON/OFF） */
   function toggleLayerInSet(ctrlComp, targetCompName, time, layerName) {
     var set = readVisibleSet(ctrlComp, targetCompName, time);
@@ -569,6 +580,98 @@
     if (at >= 0) set.splice(at, 1);
     else set.push(layerName);
     return writeMarkerNameAtTime(ctrlComp, targetCompName, time, set.join(","));
+  }
+
+  // ── 反転バリエーション（:flipx 等）対応の選択肢ヘルパー（純粋・テスト可能） ──
+  // choice = { fullName(=base 完全名), label, layer, flips:[{suffix, fullName, layer}] }
+  // base と flip は「同じ要素の通常/反転」で相互排他。集合にはどれか1つだけ入る。
+
+  /** base + すべての flip の完全名一覧 */
+  function choiceAllNames(choice) {
+    var out = [choice.fullName];
+    if (choice.flips) {
+      for (var i = 0; i < choice.flips.length; i++) {
+        out.push(choice.flips[i].fullName);
+      }
+    }
+    return out;
+  }
+
+  /** 集合内で現在表示中のバリエーション名（base か flip のどれか）。無ければ null */
+  function choiceVisibleName(choice, set) {
+    var all = choiceAllNames(choice);
+    for (var i = 0; i < all.length; i++) {
+      if (indexOfName(set, all[i]) >= 0) return all[i];
+    }
+    return null;
+  }
+
+  /** この選択肢が（base/flip いずれかで）表示中か */
+  function choiceIsVisible(choice, set) {
+    return choiceVisibleName(choice, set) !== null;
+  }
+
+  /** 指定 suffix（""=base）のバリエーション名。無ければ null */
+  function choiceVariantName(choice, suffix) {
+    if (suffix === "" || suffix === null || suffix === undefined) {
+      return choice.fullName;
+    }
+    if (choice.flips) {
+      for (var i = 0; i < choice.flips.length; i++) {
+        if (choice.flips[i].suffix === suffix) return choice.flips[i].fullName;
+      }
+    }
+    return null;
+  }
+
+  /** グローバル反転状態 flipState を反映した「選ぶべき名前」。無ければ base */
+  function preferredVariantName(choice, flipState) {
+    return choiceVariantName(choice, flipState) || choice.fullName;
+  }
+
+  /** 現在表示中バリエーションの suffix（""=base / null=非表示） */
+  function choiceVisibleSuffix(choice, set) {
+    var vis = choiceVisibleName(choice, set);
+    if (vis === null) return null;
+    if (vis === choice.fullName) return "";
+    if (choice.flips) {
+      for (var i = 0; i < choice.flips.length; i++) {
+        if (choice.flips[i].fullName === vis) return choice.flips[i].suffix;
+      }
+    }
+    return "";
+  }
+
+  /** ノード内の全ラジオ選択肢の全バリエーション名（排他クリア用） */
+  function collectRadioVariantNames(node) {
+    var names = [];
+    for (var i = 0; i < node.radioChoices.length; i++) {
+      var all = choiceAllNames(node.radioChoices[i]);
+      for (var j = 0; j < all.length; j++) names.push(all[j]);
+    }
+    return names;
+  }
+
+  /** ツリー全体で使われている反転 suffix の一覧（"flipx"/"flipy"/"flipxy"） */
+  function collectFlipSuffixes(nodes) {
+    var seen = {};
+    var out = [];
+    function scan(choices) {
+      for (var i = 0; i < choices.length; i++) {
+        var fl = choices[i].flips || [];
+        for (var j = 0; j < fl.length; j++) {
+          if (!seen[fl[j].suffix]) {
+            seen[fl[j].suffix] = true;
+            out.push(fl[j].suffix);
+          }
+        }
+      }
+    }
+    for (var n = 0; n < nodes.length; n++) {
+      scan(nodes[n].radioChoices);
+      scan(nodes[n].optionalChoices);
+    }
+    return out;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -2523,6 +2626,22 @@
     };
   }
 
+  // parsed の反転情報を suffix 文字列に戻す（"" / "flipx" / "flipy" / "flipxy"）
+  function flipSuffixOf(parsed) {
+    if (parsed.flipx && parsed.flipy) return "flipxy";
+    if (parsed.flipx) return "flipx";
+    if (parsed.flipy) return "flipy";
+    return "";
+  }
+
+  // 反転バリエーションを表す短いグリフ（ボタン表示用）
+  function flipGlyph(suffix) {
+    if (suffix === "flipxy") return "↔↕"; // ↔↕
+    if (suffix === "flipx") return "↔"; // ↔
+    if (suffix === "flipy") return "↕"; // ↕
+    return "⇄"; // ⇄ = 通常（切替可能）
+  }
+
   /**
    * PSD ルートコンポからネストコンポ（= PSD のグループ）を再帰走査し、
    * 命名規則に該当するレイヤーをグループごとに収集する。
@@ -2551,7 +2670,7 @@
         exclusiveLayers: [],
         optionalLayers: [],
         forcedLayers: [],
-        flipSkipped: [],
+        flipVariants: [],
         defaultLayer: null,
       };
 
@@ -2566,8 +2685,10 @@
         var isFolder = !!(source && source instanceof CompItem);
 
         if (parsed.flipx || parsed.flipy) {
-          // 反転バリエーションは v1 では未対応。種別に関わらず必ずレポートする
-          info.flipSkipped.push(layer);
+          // 反転バリエーション（:flipx/:flipy）は「通常レイヤーとのペア」。
+          // base が同コンポ・同種別にあれば登録対象（autoSetupPsd でペア判定）。
+          // base が無い孤立 flip（線画 :flipx 等）は登録せずレポートのみ。
+          info.flipVariants.push({ layer: layer, parsed: parsed });
         } else if (parsed.exclusive) {
           info.exclusiveLayers.push({ layer: layer, parsed: parsed });
           if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
@@ -2664,9 +2785,11 @@
       kept: 0,
       forced: 0,
       markersWritten: 0,
+      flipPaired: 0,
       renamedComps: [],
       renamedLayers: [],
-      flipSkipped: [],
+      flipVariants: [],
+      commaNames: [],
     };
 
     beginUndo("EmoLabMaker: PSDセットアップ");
@@ -2697,10 +2820,48 @@
           report.forced++;
         }
 
-        for (var s = 0; s < group.flipSkipped.length; s++) {
-          report.flipSkipped.push(
-            comp.name + ": " + group.flipSkipped[s].name
+        // レイヤー名にカンマがあると「表示中集合」（カンマ区切り）が壊れるため警告する
+        var commaCheck = [];
+        for (var cx = 0; cx < group.exclusiveLayers.length; cx++) {
+          commaCheck.push(group.exclusiveLayers[cx].layer.name);
+        }
+        for (var co = 0; co < group.optionalLayers.length; co++) {
+          commaCheck.push(group.optionalLayers[co].layer.name);
+        }
+        for (var cf = 0; cf < group.forcedLayers.length; cf++) {
+          commaCheck.push(group.forcedLayers[cf].name);
+        }
+        for (var cv = 0; cv < group.flipVariants.length; cv++) {
+          commaCheck.push(group.flipVariants[cv].layer.name);
+        }
+        for (var cc = 0; cc < commaCheck.length; cc++) {
+          if (commaCheck[cc].indexOf(",") >= 0) {
+            report.commaNames.push(comp.name + ": " + commaCheck[cc]);
+          }
+        }
+
+        // 反転バリエーション（:flipx 等）の処理。base が同コンポ・同種別にある
+        // ものだけ「ペア」として登録し、グローバル反転で base⇄flip をスワップできる
+        // ようにする。base のない孤立 flip（線画 :flipx 等）はスキップ（レポートのみ）。
+        var baseKeys = {};
+        for (var bx = 0; bx < group.exclusiveLayers.length; bx++) {
+          baseKeys[group.exclusiveLayers[bx].parsed.base + "|EX"] = true;
+        }
+        for (var bo = 0; bo < group.optionalLayers.length; bo++) {
+          baseKeys[group.optionalLayers[bo].parsed.base + "|OPT"] = true;
+        }
+        var pairedFlipLayers = [];
+        for (var s = 0; s < group.flipVariants.length; s++) {
+          var fv = group.flipVariants[s];
+          var fvKey = fv.parsed.base + "|" + (fv.parsed.exclusive ? "EX" : "OPT");
+          var paired = !fv.parsed.forced && baseKeys[fvKey] === true;
+          report.flipVariants.push(
+            comp.name +
+              ": " +
+              fv.layer.name +
+              (paired ? "（ペア登録）" : "（ペアなし→スキップ）")
           );
+          if (paired) pairedFlipLayers.push(fv.layer);
         }
 
         // 排他も任意指定もないグループには制御レイヤーを作らない
@@ -2714,13 +2875,17 @@
 
         createCtrlLayer(ctrlComp, comp.name);
 
-        // 排他（*）＋任意指定（無印）を同じ式で登録
+        // 排他（*）＋任意指定（無印）＋ペア反転を同じ式で登録
         var toRegister = [];
         for (var r = 0; r < group.exclusiveLayers.length; r++) {
           toRegister.push(group.exclusiveLayers[r].layer);
         }
         for (var o = 0; o < group.optionalLayers.length; o++) {
           toRegister.push(group.optionalLayers[o].layer);
+        }
+        for (var pf = 0; pf < pairedFlipLayers.length; pf++) {
+          toRegister.push(pairedFlipLayers[pf]);
+          report.flipPaired++;
         }
 
         // registerLayers が enabled=true に変えてしまう前に、任意指定レイヤーの
@@ -2816,6 +2981,9 @@
         group.optionalLayers.length +
         " / 強制 " +
         group.forcedLayers.length +
+        (group.flipVariants.length > 0
+          ? " / 反転 " + group.flipVariants.length
+          : "") +
         (defaultLayer
           ? " / 既定: " + parsePsdLayerName(defaultLayer.name).base
           : "") +
@@ -2873,6 +3041,9 @@
     if (report.forced > 0) {
       summaryLines.push("強制表示 (!): " + report.forced + " レイヤー");
     }
+    if (report.flipPaired > 0) {
+      summaryLines.push("反転ペア登録 (:flipx 等): " + report.flipPaired + " レイヤー");
+    }
     if (report.markersWritten > 0) {
       summaryLines.push("デフォルト表情マーカー: " + report.markersWritten + " 件");
     }
@@ -2891,9 +3062,18 @@
       detailLines = detailLines.concat(report.renamedLayers);
       detailLines.push("");
     }
-    if (report.flipSkipped.length > 0) {
-      detailLines.push("【スキップした反転バリエーション (:flipx 等は未対応)】");
-      detailLines = detailLines.concat(report.flipSkipped);
+    if (report.flipVariants.length > 0) {
+      detailLines.push(
+        "【反転バリエーション (:flipx/:flipy)】ペアは登録、ペアなしはスキップ"
+      );
+      detailLines = detailLines.concat(report.flipVariants);
+      detailLines.push("");
+    }
+    if (report.commaNames.length > 0) {
+      detailLines.push(
+        "【警告: レイヤー名にカンマ「,」】表示中集合が壊れる恐れ。リネーム推奨"
+      );
+      detailLines = detailLines.concat(report.commaNames);
     }
 
     if (detailLines.length > 0) {
@@ -2965,7 +3145,7 @@
   );
   psdSetupBtn.alignment = ["fill", "top"];
   psdSetupBtn.helpTip =
-    "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示) を解釈して表情切替を自動セットアップ。再実行で更新";
+    "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示 / :flipx = 反転ペア) を解釈して表情切替を自動セットアップ。再実行で更新";
 
   // ══════════════════════════════════════════════════════════════════
   // 目パチ (自動まばたき)
@@ -3519,6 +3699,7 @@
       var radio = [];
       var optional = [];
       var forced = [];
+      var flipEntries = []; // {base, suffix, fullName, layer, exclusive}
       var nodeCtrlName = null;
       var children = [];
       var childDepth = isRoot ? depth : depth + 1;
@@ -3542,18 +3723,26 @@
         var isFolder = !!(src && src instanceof CompItem);
 
         if (parsed.flipx || parsed.flipy) {
-          // flip バリエーションは選択肢にしない
+          // 反転バリエーション。ループ後に base 選択肢へ「ペア」として束ねる。
+          // 強制(!)/フォルダの flip はペア対象外（ループ後に base が無ければ捨てる）
+          flipEntries.push({
+            base: parsed.base,
+            suffix: flipSuffixOf(parsed),
+            fullName: layer.name,
+            layer: layer,
+            exclusive: parsed.exclusive,
+          });
         } else if (parsed.exclusive) {
           // * はリーフでもフォルダでも radio choice（フォルダは下のサブ階層切替も兼ねる）
-          radio.push({ fullName: layer.name, label: parsed.base, layer: layer });
+          radio.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
         } else if (parsed.forced) {
           // ! 強制表示。リーフのみ情報として出す（グレーアウト）。フォルダはコンテナ
           if (!isFolder) {
-            forced.push({ fullName: layer.name, label: parsed.base, layer: layer });
+            forced.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
           }
         } else if (!isFolder) {
           // 無印リーフ = 任意指定。無印/! フォルダは choice にしない
-          optional.push({ fullName: layer.name, label: parsed.base, layer: layer });
+          optional.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
         }
 
         if (!nodeCtrlName) {
@@ -3569,6 +3758,23 @@
               forced: parsed.forced,
             })
           );
+        }
+      }
+
+      // 反転バリエーションを base 選択肢へ束ねる（同種別・同 base 名のみペア）。
+      // base が無い孤立 flip（線画 :flipx 等）は選択肢を作らず捨てる。
+      for (var fe = 0; fe < flipEntries.length; fe++) {
+        var ent = flipEntries[fe];
+        var pool = ent.exclusive ? radio : optional;
+        for (var pc = 0; pc < pool.length; pc++) {
+          if (pool[pc].label === ent.base) {
+            pool[pc].flips.push({
+              suffix: ent.suffix,
+              fullName: ent.fullName,
+              layer: ent.layer,
+            });
+            break;
+          }
         }
       }
 
@@ -3652,6 +3858,27 @@
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
+  // ── グローバル反転（:flipx/:flipy のペアを一括スワップ） ──
+  // PSDToolKit の反転は立ち絵全体の状態。反転ペアを持つ立ち絵でのみ表示する。
+  var stageFlipRow = tabStage.add("group");
+  stageFlipRow.orientation = "row";
+  stageFlipRow.alignment = ["fill", "top"];
+  stageFlipRow.alignChildren = ["left", "center"];
+  stageFlipRow.spacing = 4;
+  stageFlipRow.add("statictext", undefined, "反転");
+  var stageFlipXBtn = stageFlipRow.add("button", undefined, "↔ 左右");
+  stageFlipXBtn.preferredSize = [64, BUTTON_HEIGHT];
+  stageFlipXBtn.helpTip = "表示中のペアを :flipx（左右反転）側へ一括切替";
+  var stageFlipYBtn = stageFlipRow.add("button", undefined, "↕ 上下");
+  stageFlipYBtn.preferredSize = [64, BUTTON_HEIGHT];
+  stageFlipYBtn.helpTip = "表示中のペアを :flipy（上下反転）側へ一括切替";
+  var stageFlipNoneBtn = stageFlipRow.add("button", undefined, "通常");
+  stageFlipNoneBtn.preferredSize = [52, BUTTON_HEIGHT];
+  stageFlipNoneBtn.helpTip = "反転を解除して通常レイヤーへ戻す";
+  var stageFlipInfo = stageFlipRow.add("statictext", undefined, "（通常）");
+  stageFlipInfo.alignment = ["fill", "center"];
+  stageFlipRow.visible = false;
+
   // 表情セット（ツリーの上に配置）
   var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
   stageSetPanel.orientation = "row";
@@ -3700,6 +3927,7 @@
   var stageScrollValue = 0;
   var stageButtons = []; // 描画済み選択肢コントロール（追従の即時更新用）
   var stageWarnings = []; // 「未選択」警告ラベル（{ctrl, node}）
+  var stageFlipState = ""; // グローバル反転状態（""=通常 / "flipx" / "flipy" / "flipxy"）
 
   // 警告条件: 中身がすべてラジオ（排他）なのに、現在どれも選択されていない階層。
   // = 任意/強制の選択肢がなく、ラジオが1つ以上あり、表示中集合にどれも含まれない。
@@ -3710,8 +3938,8 @@
       return false;
     if (node.radioChoices.length === 0) return false;
     for (var i = 0; i < node.radioChoices.length; i++) {
-      if (indexOfName(node.visibleSet, node.radioChoices[i].fullName) >= 0)
-        return false;
+      // base でも flip でも表示中なら「未選択ではない」
+      if (choiceIsVisible(node.radioChoices[i], node.visibleSet)) return false;
     }
     return true;
   }
@@ -3723,22 +3951,31 @@
     if (!node || !node.ctrlComp) return;
     var arrs = [node.radioChoices, node.optionalChoices];
     var toReg = [];
+    // base レイヤーと、そのペアの反転レイヤーをまとめて対象にする
+    var layers = [];
     for (var a = 0; a < arrs.length; a++) {
       for (var i = 0; i < arrs[a].length; i++) {
-        var ly = arrs[a][i].layer;
-        if (!ly) continue;
-        if (
-          !isRegistered(ly) &&
-          !hasOpacitySignature(ly, LAB_MAP_SIGNATURE) &&
-          !hasOpacitySignature(ly, BLINK_SIGNATURE)
-        ) {
-          toReg.push(ly);
-        } else {
-          // 既に式が付いていても、PSD 由来で目が消えていれば点ける
-          try {
-            ly.enabled = true;
-          } catch (e) {}
+        if (arrs[a][i].layer) layers.push(arrs[a][i].layer);
+        var fl = arrs[a][i].flips || [];
+        for (var f = 0; f < fl.length; f++) {
+          if (fl[f].layer) layers.push(fl[f].layer);
         }
+      }
+    }
+    for (var k = 0; k < layers.length; k++) {
+      var ly = layers[k];
+      if (!ly) continue;
+      if (
+        !isRegistered(ly) &&
+        !hasOpacitySignature(ly, LAB_MAP_SIGNATURE) &&
+        !hasOpacitySignature(ly, BLINK_SIGNATURE)
+      ) {
+        toReg.push(ly);
+      } else {
+        // 既に式が付いていても、PSD 由来で目が消えていれば点ける
+        try {
+          ly.enabled = true;
+        } catch (e) {}
       }
     }
     if (toReg.length > 0) {
@@ -3892,7 +4129,17 @@
         var curW = 0;
         for (var ci = 0; ci < items.length; ci++) {
           // ラジオ=radiobutton / 任意=checkbox / 強制=無効checkbox。幅で折返し
-          var est = items[ci].ch.label.length * 18 + 40;
+          var hasFlips =
+            items[ci].ch.flips && items[ci].ch.flips.length > 0;
+          // 反転中はラベルにグリフを付けて状態を見せる
+          var curSuffix =
+            items[ci].kind === "forced"
+              ? null
+              : choiceVisibleSuffix(items[ci].ch, node.visibleSet);
+          var dispLabel =
+            items[ci].ch.label +
+            (curSuffix ? " " + flipGlyph(curSuffix) : "");
+          var est = dispLabel.length * 18 + 40 + (hasFlips ? 8 : 0);
           if (curRow === null || (curW + est > avail && curW > 0)) {
             curRow = block.add("group");
             curRow.orientation = "row";
@@ -3902,17 +4149,22 @@
             spc.preferredSize = [choiceIndent, 1];
             curW = 0;
           }
-          (function (nd, it, parentRow) {
-            var on = indexOfName(nd.visibleSet, it.ch.fullName) >= 0;
+          (function (nd, it, parentRow, label) {
+            var on = choiceIsVisible(it.ch, nd.visibleSet);
             var ctrl;
             if (it.kind === "radio") {
-              ctrl = parentRow.add("radiobutton", undefined, it.ch.label);
+              ctrl = parentRow.add("radiobutton", undefined, label);
             } else {
-              ctrl = parentRow.add("checkbox", undefined, it.ch.label);
+              ctrl = parentRow.add("checkbox", undefined, label);
             }
             ctrl.value = it.kind === "forced" ? true : on;
+            var flipTip =
+              it.ch.flips && it.ch.flips.length > 0
+                ? "（反転ペアあり: ヘッダの反転ボタンで切替）"
+                : "";
             ctrl.helpTip =
-              it.ch.fullName + (it.kind === "forced" ? "（常に表示 !）" : "");
+              it.ch.fullName +
+              (it.kind === "forced" ? "（常に表示 !）" : flipTip);
             stageButtons.push({
               ctrl: ctrl,
               node: nd,
@@ -3930,29 +4182,40 @@
                 setStageStatus("制御コンポが見つかりません。");
                 return;
               }
+              var time = nd.ctrlComp.time;
               beginUndo("emo2layer: 立ち絵 切替");
               try {
                 // 未登録 / 目が消えたレイヤーでも切り替えられるように保証する
                 ensureNodeRegistered(nd);
+                // グローバル反転状態を反映した名前を書く（反転中は flip 側を選ぶ）
+                var chosen = preferredVariantName(it.ch, stageFlipState);
                 if (it.kind === "radio") {
-                  var radioNames = [];
-                  for (var k = 0; k < nd.radioChoices.length; k++) {
-                    radioNames.push(nd.radioChoices[k].fullName);
-                  }
                   setRadioSelection(
                     nd.ctrlComp,
                     nd.comp.name,
-                    nd.ctrlComp.time,
-                    it.ch.fullName,
-                    radioNames
+                    time,
+                    chosen,
+                    collectRadioVariantNames(nd)
                   );
                 } else {
-                  toggleLayerInSet(
-                    nd.ctrlComp,
-                    nd.comp.name,
-                    nd.ctrlComp.time,
-                    it.ch.fullName
-                  );
+                  // 任意: 表示中なら全バリエーションOFF、非表示なら chosen をON
+                  var curSet = readVisibleSet(nd.ctrlComp, nd.comp.name, time);
+                  if (choiceIsVisible(it.ch, curSet)) {
+                    removeNamesFromSet(
+                      nd.ctrlComp,
+                      nd.comp.name,
+                      time,
+                      choiceAllNames(it.ch)
+                    );
+                  } else {
+                    setRadioSelection(
+                      nd.ctrlComp,
+                      nd.comp.name,
+                      time,
+                      chosen,
+                      choiceAllNames(it.ch)
+                    );
+                  }
                 }
               } finally {
                 endUndo();
@@ -3961,7 +4224,7 @@
               // 構造は変えず表示状態だけ即時同期（再構築しないので排他選択が軽い）
               syncStageControls();
             };
-          })(node, items[ci], curRow);
+          })(node, items[ci], curRow, dispLabel);
           curW += est + 4;
         }
       }
@@ -4063,8 +4326,7 @@
       var e = stageButtons[i];
       try {
         if (e.kind === "forced") continue;
-        var on = indexOfName(e.node.visibleSet, e.ch.fullName) >= 0;
-        e.ctrl.value = on;
+        e.ctrl.value = choiceIsVisible(e.ch, e.node.visibleSet);
         e.ctrl.enabled = e.node.active;
       } catch (err) {}
     }
@@ -4075,6 +4337,75 @@
         );
       } catch (err2) {}
     }
+  }
+
+  // グローバル反転: 表示中の各ペアを state（""=通常 / flipx / flipy / flipxy）側へ
+  // 一括スワップする。非表示の選択肢は変更しない。state に該当する反転が無い choice は
+  // base のまま（AE 標準のキャンバスごとミラーはしない＝レイヤー差し替えのみ）。
+  function applyStageFlip(state) {
+    if (!stageNodes || stageNodes.length === 0) return;
+    resolveStageState();
+    var changed = 0;
+    beginUndo("emo2layer: 立ち絵 反転");
+    try {
+      for (var n = 0; n < stageNodes.length; n++) {
+        var node = stageNodes[n];
+        if (!node.ctrlComp) continue;
+        var pools = [node.radioChoices, node.optionalChoices];
+        var hasFlip = false;
+        var p, c;
+        for (p = 0; p < pools.length; p++) {
+          for (c = 0; c < pools[p].length; c++) {
+            if (pools[p][c].flips && pools[p][c].flips.length > 0) {
+              hasFlip = true;
+              break;
+            }
+          }
+        }
+        if (!hasFlip) continue;
+        ensureNodeRegistered(node);
+        var time = node.ctrlComp.time;
+        var set = readVisibleSet(node.ctrlComp, node.comp.name, time);
+        var dirty = false;
+        for (p = 0; p < pools.length; p++) {
+          for (c = 0; c < pools[p].length; c++) {
+            var choice = pools[p][c];
+            var vis = choiceVisibleName(choice, set);
+            if (vis === null) continue; // 非表示はそのまま
+            var want = choiceVariantName(choice, state);
+            if (want === null) want = choice.fullName; // 該当反転が無ければ base
+            if (want !== vis) {
+              var all = choiceAllNames(choice);
+              var next = [];
+              for (var s = 0; s < set.length; s++) {
+                if (indexOfName(all, set[s]) < 0) next.push(set[s]);
+              }
+              next.push(want);
+              set = next;
+              dirty = true;
+            }
+          }
+        }
+        if (dirty) {
+          writeMarkerNameAtTime(
+            node.ctrlComp,
+            node.comp.name,
+            time,
+            set.join(",")
+          );
+          changed++;
+        }
+      }
+    } finally {
+      endUndo();
+    }
+    stageFlipState = state;
+    refreshStage(false); // ラベルのグリフ更新のため作り直す
+    setStageStatus(
+      changed > 0
+        ? changed + " 階層を反転状態へ更新しました。"
+        : "反転対象（表示中のペア）がありませんでした。"
+    );
   }
 
   // 祖先のいずれかが折りたたまれているか（折りたたみ表示判定）
@@ -4104,6 +4435,14 @@
     resolveStageState();
 
     setCheckState(stageCtrlInfo, stageNodes.length > 0);
+
+    // 反転ペアを持つ立ち絵のときだけ反転コントロールを出す
+    var hasFlip = collectFlipSuffixes(stageNodes).length > 0;
+    stageFlipRow.visible = hasFlip;
+    stageFlipInfo.text = stageFlipState
+      ? "反転中 " + flipGlyph(stageFlipState)
+      : "（通常）";
+
     rebuildStageTree();
     rebuildStageEmoSetDropdown(
       stageSetDropdown.selection ? stageSetDropdown.selection.text : null
@@ -4129,6 +4468,10 @@
       "4. 上位コンポが選択されていない階層はグレーアウトします",
       "5. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
       "",
+      "【反転 (:flipx/:flipy)】通常レイヤーとペアの反転レイヤーがある場合、",
+      "ヘッダの「↔ 左右 / ↕ 上下 / 通常」で表示中のペアを一括スワップします",
+      "（PSDToolKit の反転は立ち絵全体の状態。キャンバスごとの反転はしません）。",
+      "",
       "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
       "（取れない場合は「更新」。ScriptUI は再生ヘッド移動を直接検知できません）。",
       "",
@@ -4148,6 +4491,16 @@
 
   stageHelpBtn.onClick = function () {
     showStageHelpDialog();
+  };
+
+  stageFlipXBtn.onClick = function () {
+    applyStageFlip("flipx");
+  };
+  stageFlipYBtn.onClick = function () {
+    applyStageFlip("flipy");
+  };
+  stageFlipNoneBtn.onClick = function () {
+    applyStageFlip("");
   };
 
   stageRootDropdown.onChange = function () {
