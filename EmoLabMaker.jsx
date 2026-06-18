@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.13.0
+ * @version 1.14.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -57,6 +57,11 @@
   var cfgShowForced = getSettingBool("showForced", true);
   var cfgHideInactive = getSettingBool("hideInactive", false);
   var cfgIndentWidth = getSettingNum("indentWidth", 14);
+
+  // 口パクのタイミング設定（ミリ秒。起動時に読み込み・変更時に永続化）
+  var cfgLabOffsetMs = getSettingNum("labOffsetMs", 0); // 全体シフト（映像先行）
+  var cfgLabHeadMs = getSettingNum("labHeadMs", 0); // 開始を遅らせる前マージン
+  var cfgLabTailMs = getSettingNum("labTailMs", 0); // 終了を早める後トリム
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -1588,19 +1593,57 @@
   /**
    * targetLayer に音素マーカーを配置する（既存マーカーは全削除してから）。
    * selectedPhonemes は {startTime,endTime,phoneme} の配列（開始時間順）。
+   * headSec/tailSec が指定され、かつ targetLayer がヌル（音声/映像を持たない）なら、
+   * レイヤーの in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める。
+   * （findPhonemeLayer が範囲外を無視するので、範囲外は閉じ口/立ち絵に戻る）
+   * 音声・映像レイヤーは音を切らないよう in/out を変更せずスキップする。
+   * 戻り値: { trimmed: bool, hasMedia: bool }
    */
-  function writeLabMarkers(targetLayer, attachTime, labStartTime, selectedPhonemes, offsetSec) {
+  function writeLabMarkers(
+    targetLayer,
+    attachTime,
+    labStartTime,
+    selectedPhonemes,
+    offsetSec,
+    headSec,
+    tailSec
+  ) {
     var markers = targetLayer.property("Marker");
     for (var i = markers.numKeys; i >= 1; i--) {
       markers.removeKey(i);
     }
+    var firstTime = null;
+    var lastTime = null;
     for (var k = 0; k < selectedPhonemes.length; k++) {
       var markerTime =
         attachTime + (selectedPhonemes[k].startTime - labStartTime) + offsetSec;
       targetLayer
         .property("Marker")
         .setValueAtTime(markerTime, new MarkerValue(selectedPhonemes[k].phoneme));
+      if (firstTime === null) firstTime = markerTime;
+      lastTime = markerTime;
     }
+
+    headSec = headSec || 0;
+    tailSec = tailSec || 0;
+    var hasMedia = false;
+    try {
+      hasMedia = !!(targetLayer.hasAudio || targetLayer.source);
+    } catch (e) {}
+    var trimmed = false;
+    if ((headSec > 0 || tailSec > 0) && firstTime !== null && !hasMedia) {
+      // ヌル [Lab] のときだけ in/out を詰める（音声を壊さないため）
+      var newIn = firstTime + headSec;
+      var newOut = lastTime - tailSec;
+      if (newOut > newIn) {
+        try {
+          targetLayer.inPoint = newIn;
+          targetLayer.outPoint = newOut;
+          trimmed = true;
+        } catch (e2) {}
+      }
+    }
+    return { trimmed: trimmed, hasMedia: hasMedia };
   }
 
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
@@ -1810,34 +1853,65 @@
   var deselectAllBtn = phonemeSelectorGroup.add("button", undefined, "解除");
   deselectAllBtn.alignment = ["fill", "center"];
 
-  // ========== オフセット設定グループ ==========
+  // ========== タイミング設定グループ（全て app.settings で永続化） ==========
   var offsetGroup = tabLab.add("group");
   offsetGroup.orientation = "row";
   offsetGroup.alignment = ["fill", "top"];
   offsetGroup.alignChildren = ["left", "center"];
   offsetGroup.spacing = 5;
 
-  var offsetLabel = offsetGroup.add(
-    "statictext",
-    undefined,
-    "オフセット (ms):"
-  );
+  var offsetLabel = offsetGroup.add("statictext", undefined, "オフセット(ms)");
   offsetLabel.alignment = ["left", "center"];
 
-  var offsetInput = offsetGroup.add("edittext", undefined, "-67");
-  offsetInput.alignment = ["fill", "center"];
+  var offsetInput = offsetGroup.add("edittext", undefined, String(cfgLabOffsetMs));
+  offsetInput.preferredSize = [48, 25];
   offsetInput.helpTip =
-    "動画先行の法則: 映像は音声より数フレーム速いほうが自然に見えます（負の値=映像先行）";
+    "動画先行の法則: 映像は音声より数フレーム速いほうが自然に見えます（負の値=映像先行）。全マーカーを一律シフト";
 
   var frameMinus = offsetGroup.add("button", undefined, "<");
-  frameMinus.preferredSize = [35, 25];
-  frameMinus.alignment = ["right", "center"];
+  frameMinus.preferredSize = [30, 25];
+  frameMinus.alignment = ["left", "center"];
   frameMinus.helpTip = "1フレーム戻す（映像をさらに先行）";
 
   var framePlus = offsetGroup.add("button", undefined, ">");
-  framePlus.preferredSize = [35, 25];
-  framePlus.alignment = ["right", "center"];
+  framePlus.preferredSize = [30, 25];
+  framePlus.alignment = ["left", "center"];
   framePlus.helpTip = "1フレーム進める";
+
+  offsetGroup.add("statictext", undefined, "頭(ms)");
+  var headInput = offsetGroup.add("edittext", undefined, String(cfgLabHeadMs));
+  headInput.preferredSize = [44, 25];
+  headInput.helpTip =
+    "口パク開始の前マージン。この時間ぶん開始を遅らせ、それまでは口を閉じ/立ち絵に戻す（[Lab]レイヤーのインを詰める）";
+
+  offsetGroup.add("statictext", undefined, "尾(ms)");
+  var tailInput = offsetGroup.add("edittext", undefined, String(cfgLabTailMs));
+  tailInput.preferredSize = [44, 25];
+  tailInput.helpTip =
+    "口パク終了の後トリム。この時間ぶん終了を早め、以降は口を閉じ/立ち絵に戻す（[Lab]レイヤーのアウトを詰める）";
+
+  // 入力値を読み取り、範囲を整え、永続化するヘルパー
+  function readLabTimings() {
+    var off = parseFloat(offsetInput.text);
+    var head = parseFloat(headInput.text);
+    var tail = parseFloat(tailInput.text);
+    if (isNaN(off)) off = 0;
+    if (isNaN(head) || head < 0) head = 0;
+    if (isNaN(tail) || tail < 0) tail = 0;
+    cfgLabOffsetMs = off;
+    cfgLabHeadMs = head;
+    cfgLabTailMs = tail;
+    offsetInput.text = String(off);
+    headInput.text = String(head);
+    tailInput.text = String(tail);
+    setSettingNum("labOffsetMs", off);
+    setSettingNum("labHeadMs", head);
+    setSettingNum("labTailMs", tail);
+    return { offsetSec: off / 1000, headSec: head / 1000, tailSec: tail / 1000 };
+  }
+  offsetInput.onChange = readLabTimings;
+  headInput.onChange = readLabTimings;
+  tailInput.onChange = readLabTimings;
 
   // ========== 口形状マッピング (PSDToolKit互換) ==========
   // あ/い/う/え/お/ん の口形レイヤーに音素グループを割り当てる。
@@ -2430,17 +2504,18 @@
         }
       }
 
-      // オフセット値を取得（ミリ秒→秒に変換）
-      var offsetMs = parseFloat(offsetInput.text) || 0;
-      var offsetSec = offsetMs / 1000;
+      // タイミング設定を取得（ミリ秒→秒）。読み取り時に永続化もされる
+      var t = readLabTimings();
 
-      // 既存マーカーを削除して配置（共通関数）
-      writeLabMarkers(
+      // 既存マーカーを削除して配置（共通関数）。ヌル [Lab] なら頭/尾で in/out を詰める
+      var placeResult = writeLabMarkers(
         targetLayer,
         attachTime,
         labStartTime,
         selectedPhonemes,
-        offsetSec
+        t.offsetSec,
+        t.headSec,
+        t.tailSec
       );
     } finally {
       endUndo();
@@ -2455,6 +2530,16 @@
       "s\n" +
       "対象: " +
       targetLayer.name;
+    if ((cfgLabHeadMs > 0 || cfgLabTailMs > 0) && placeResult) {
+      if (placeResult.trimmed) {
+        message +=
+          "\n頭/尾トリム: 頭 " + cfgLabHeadMs + "ms / 尾 " + cfgLabTailMs + "ms";
+      } else if (placeResult.hasMedia) {
+        message +=
+          "\n※頭/尾トリムは音声・映像レイヤーには未適用（音声を切らないため）。" +
+          "ヌル [Lab] レイヤーで使ってください";
+      }
+    }
     alert(message);
   };
 
