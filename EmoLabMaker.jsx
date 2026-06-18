@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.15.0
+ * @version 1.15.1
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -1631,8 +1631,9 @@
       hasMedia = !!(targetLayer.hasAudio || targetLayer.source);
     } catch (e) {}
     var trimmed = false;
-    if ((headSec > 0 || tailSec > 0) && firstTime !== null && !hasMedia) {
-      // ヌル [Lab] のときだけ in/out を詰める（音声を壊さないため）
+    if ((headSec > 0 || tailSec > 0) && firstTime !== null) {
+      // in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める（範囲外は閉じ口/立ち絵）。
+      // 音声・映像レイヤーでも適用するため、音声の頭/尾も同じだけ切れる点に注意。
       var newIn = firstTime + headSec;
       var newOut = lastTime - tailSec;
       if (newOut > newIn) {
@@ -1882,13 +1883,13 @@
   var headInput = offsetGroup.add("edittext", undefined, String(cfgLabHeadMs));
   headInput.preferredSize = [44, 25];
   headInput.helpTip =
-    "口パク開始の前マージン。この時間ぶん開始を遅らせ、それまでは口を閉じ/立ち絵に戻す（[Lab]レイヤーのインを詰める）";
+    "口パク開始の前カット。先頭この時間ぶんは口パクせず閉じ口/立ち絵（[Lab]のインを詰める）。音声レイヤーだと音声の頭も切れます";
 
   offsetGroup.add("statictext", undefined, "尾(ms)");
   var tailInput = offsetGroup.add("edittext", undefined, String(cfgLabTailMs));
   tailInput.preferredSize = [44, 25];
   tailInput.helpTip =
-    "口パク終了の後トリム。この時間ぶん終了を早め、以降は口を閉じ/立ち絵に戻す（[Lab]レイヤーのアウトを詰める）";
+    "口パク終了の後カット。末尾この時間ぶんは口パクせず閉じ口/立ち絵（[Lab]のアウトを詰める）。音声レイヤーだと音声の尾も切れます";
 
   // 入力値を読み取り、範囲を整え、永続化するヘルパー
   function readLabTimings() {
@@ -2565,10 +2566,9 @@
       if (placeResult.trimmed) {
         message +=
           "\n頭/尾トリム: 頭 " + cfgLabHeadMs + "ms / 尾 " + cfgLabTailMs + "ms";
-      } else if (placeResult.hasMedia) {
-        message +=
-          "\n※頭/尾トリムは音声・映像レイヤーには未適用（音声を切らないため）。" +
-          "ヌル [Lab] レイヤーで使ってください";
+        if (placeResult.hasMedia) {
+          message += "（音声・映像レイヤーのため音声も同じだけ切れます）";
+        }
       }
     }
     alert(message);
