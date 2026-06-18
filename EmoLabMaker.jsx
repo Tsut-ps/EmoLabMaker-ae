@@ -2642,6 +2642,71 @@
     return "⇄"; // ⇄ = 通常（切替可能）
   }
 
+  function flipHasX(state) {
+    return state === "flipx" || state === "flipxy";
+  }
+  function flipHasY(state) {
+    return state === "flipy" || state === "flipxy";
+  }
+
+  // 反転状態はルートコンポの comment に "emoFlip:flipx" 等として記録する
+  // （JS メモリだけだと再読込で失われ二重反転の恐れがあるため。冪等化）
+  function readFlipState(comp) {
+    if (!comp) return "";
+    var c = "";
+    try {
+      c = comp.comment || "";
+    } catch (e) {}
+    var m = c.match(/emoFlip:(flipxy|flipx|flipy)/);
+    return m ? m[1] : "";
+  }
+  function writeFlipState(comp, state) {
+    if (!comp) return;
+    try {
+      var c = comp.comment || "";
+      c = c.replace(/\s*emoFlip:(flipxy|flipx|flipy)/g, "");
+      c = c.replace(/^\s+|\s+$/g, "");
+      if (state) c = (c ? c + " " : "") + "emoFlip:" + state;
+      comp.comment = c;
+    } catch (e) {}
+  }
+
+  // root comp の最上位レイヤーをコンポ中心線でミラーする（doX=左右 / doY=上下）。
+  // scale を反転しつつ position を「幅 - x」に置換することで、アンカー位置に
+  // 関係なく中心線で正しくミラーする（worldX' = compW - worldX）。
+  // システムレイヤー（[Emo] 等）とヌルは視覚物でないのでスキップ。
+  function mirrorLayersInComp(comp, doX, doY) {
+    if (!comp || (!doX && !doY)) return 0;
+    var cw = comp.width;
+    var ch = comp.height;
+    var count = 0;
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var L = comp.layer(i);
+      try {
+        if (isSystemLayerName(L.name)) continue;
+        var isNull = false;
+        try {
+          isNull = L.nullLayer === true;
+        } catch (en) {}
+        if (isNull) continue;
+        var pos = L.position.value;
+        var sc = L.scale.value;
+        if (doX) {
+          pos[0] = cw - pos[0];
+          sc[0] = -sc[0];
+        }
+        if (doY) {
+          pos[1] = ch - pos[1];
+          sc[1] = -sc[1];
+        }
+        L.position.setValue(pos);
+        L.scale.setValue(sc);
+        count++;
+      } catch (e) {}
+    }
+    return count;
+  }
+
   /**
    * PSD ルートコンポからネストコンポ（= PSD のグループ）を再帰走査し、
    * 命名規則に該当するレイヤーをグループごとに収集する。
@@ -4339,15 +4404,29 @@
     }
   }
 
-  // グローバル反転: 表示中の各ペアを state（""=通常 / flipx / flipy / flipxy）側へ
-  // 一括スワップする。非表示の選択肢は変更しない。state に該当する反転が無い choice は
-  // base のまま（AE 標準のキャンバスごとミラーはしない＝レイヤー差し替えのみ）。
+  // グローバル反転: state（""=通常 / flipx / flipy / flipxy）へ切り替える。
+  //   1) ルートコンポ全体を中心線でミラー（現在状態との差分だけ適用＝冪等）
+  //   2) 表示中のペアを手描き flip 側へ一括スワップ（非表示の選択肢は変更しない）
+  // PSDToolKit の「立ち絵全体の反転状態」を、キャンバスミラー＋ペア差し替えで再現する。
   function applyStageFlip(state) {
     if (!stageNodes || stageNodes.length === 0) return;
     resolveStageState();
+    var rootComp = getSelectedComp(stageRootDropdown);
     var changed = 0;
+    var mirrored = 0;
     beginUndo("emo2layer: 立ち絵 反転");
     try {
+      // 1) 幾何ミラー（現在の記録状態との差分のみ適用）
+      if (rootComp) {
+        var cur = readFlipState(rootComp);
+        var needX = flipHasX(state) !== flipHasX(cur);
+        var needY = flipHasY(state) !== flipHasY(cur);
+        if (needX || needY) {
+          mirrored = mirrorLayersInComp(rootComp, needX, needY);
+        }
+        writeFlipState(rootComp, state);
+      }
+      // 2) 表示中ペアの差し替え
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
         if (!node.ctrlComp) continue;
@@ -4401,11 +4480,11 @@
     }
     stageFlipState = state;
     refreshStage(false); // ラベルのグリフ更新のため作り直す
-    setStageStatus(
-      changed > 0
-        ? changed + " 階層を反転状態へ更新しました。"
-        : "反転対象（表示中のペア）がありませんでした。"
-    );
+    var msg = state ? "反転 " + flipGlyph(state) + " を適用" : "反転を解除";
+    msg += "（ミラー " + mirrored + " レイヤー";
+    if (changed > 0) msg += " / ペア差替 " + changed + " 階層";
+    msg += "）。";
+    setStageStatus(msg);
   }
 
   // 祖先のいずれかが折りたたまれているか（折りたたみ表示判定）
@@ -4439,6 +4518,8 @@
     // 反転ペアを持つ立ち絵のときだけ反転コントロールを出す
     var hasFlip = collectFlipSuffixes(stageNodes).length > 0;
     stageFlipRow.visible = hasFlip;
+    // 反転状態はルートコンポの comment が真実（再読込しても保持）
+    stageFlipState = readFlipState(rootComp);
     stageFlipInfo.text = stageFlipState
       ? "反転中 " + flipGlyph(stageFlipState)
       : "（通常）";
@@ -4468,9 +4549,12 @@
       "4. 上位コンポが選択されていない階層はグレーアウトします",
       "5. 切り替えは制御コンポの現在時刻にマーカーとして書き込まれます",
       "",
-      "【反転 (:flipx/:flipy)】通常レイヤーとペアの反転レイヤーがある場合、",
-      "ヘッダの「↔ 左右 / ↕ 上下 / 通常」で表示中のペアを一括スワップします",
-      "（PSDToolKit の反転は立ち絵全体の状態。キャンバスごとの反転はしません）。",
+      "【反転 (:flipx/:flipy)】ヘッダの「↔ 左右 / ↕ 上下 / 通常」で立ち絵全体を反転します",
+      "  - ルートコンポ全体を中心線でミラー（Scale 反転＋位置を中心線で反転）",
+      "  - 同時に、手描きの反転ペア（通常名 / 通常名:flipx）がある所はその flip 側へ差替",
+      "  - 反転状態はルートコンポのコメントに記録（2回押しても二重反転せず、通常で戻る）",
+      "  ※ 位置/スケールにキーフレームや式があるレイヤー、親子付けされたレイヤーは",
+      "    正しくミラーできないことがあります（静的トランスフォーム前提）",
       "",
       "再生ヘッドを動かした後はパネルをクリックすると自動更新します",
       "（取れない場合は「更新」。ScriptUI は再生ヘッド移動を直接検知できません）。",
