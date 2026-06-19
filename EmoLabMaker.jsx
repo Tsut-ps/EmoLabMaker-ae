@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.19.0
+ * @version 1.19.1
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3826,9 +3826,15 @@
     }
 
     lines = lines.concat([
+      // 乱数は seedRandom/random（レイヤー依存になり得る）を使わず、n だけの純粋な
+      // ハッシュにする。これで全レイヤー（開き/中間/閉じ）が必ず同一の瞬き時刻を共有し、
+      // 同期が崩れて隙間や重なりが出るのを防ぐ。
+      "function rndAt(n) {",
+      "  var x = Math.sin(n * 12.9898) * 43758.5453;",
+      "  return x - Math.floor(x);",
+      "}",
       "function blinkAt(n) {",
-      "  seedRandom(n, true);",
-      "  return n * interval + interval * (0.5 + random(-1, 1) * jitter * 0.5);",
+      "  return n * interval + interval * (0.5 + (rndAt(n) * 2 - 1) * jitter * 0.5);",
       "}",
       "function phaseFor(b) {",
       "  if (time < b) return 0;",
