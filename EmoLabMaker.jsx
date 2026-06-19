@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.19.2
+ * @version 1.20.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -316,20 +316,36 @@
    * inPoint の直接代入は読み取り専用になるバージョンがあるため
    * startTime を操作してコンプ全体をカバーさせる。
    */
+  // 制御ヌルを目立たなくする（マーカーは無効レイヤーでも式から読めるので動作に影響なし）。
+  //   enabled=false : プレビューに枠が出ない・描画されない
+  //   shy/guideLayer: タイムライン/書き出しから隠す
+  //   source 名も "[Emo] …" にしてプロジェクトの「ヌル N」散らかりを解消
+  function hideCtrlLayer(layer, name) {
+    try { layer.shy = true; } catch (e) {}
+    try { layer.guideLayer = true; } catch (e) {}
+    try { layer.enabled = false; } catch (e) {}
+    try { layer.label = 11; } catch (e) {}
+    try {
+      if (layer.source && layer.source.name !== name) layer.source.name = name;
+    } catch (e) {}
+  }
+
   function createCtrlLayer(ctrlComp, targetCompName) {
+    var name = getCtrlLayerName(targetCompName);
     var existing = findCtrlLayerInComp(ctrlComp, targetCompName, 0);
-    if (existing) return existing;
+    if (existing) {
+      hideCtrlLayer(existing, name); // 既存も毎回隠す（過去に作った可視ヌルの掃除）
+      return existing;
+    }
 
     var layer = ctrlComp.layers.addNull(ctrlComp.duration);
-    layer.name = getCtrlLayerName(targetCompName);
+    layer.name = name;
     layer.startTime = 0;
     // outPoint をコンプ末尾に合わせる（startTime 操作後に設定）
     try {
       layer.outPoint = ctrlComp.duration;
     } catch (e) {}
-    layer.shy = true;
-    layer.guideLayer = true;
-    layer.label = 11;
+    hideCtrlLayer(layer, name);
     return layer;
   }
 
@@ -1582,12 +1598,12 @@
   bulkOptRow.alignChildren = ["left", "center"];
   bulkOptRow.spacing = 8;
   bulkOptRow.add("statictext", undefined, "配置:");
+  var cbImportWav = bulkOptRow.add("checkbox", undefined, "音声(wav)");
+  cbImportWav.value = cfgImportWav;
   var cbImportLab = bulkOptRow.add("checkbox", undefined, "口パク(lab)");
   cbImportLab.value = cfgImportLab;
   var cbImportTxt = bulkOptRow.add("checkbox", undefined, "テキスト(txt)");
   cbImportTxt.value = cfgImportTxt;
-  var cbImportWav = bulkOptRow.add("checkbox", undefined, "音声(wav)");
-  cbImportWav.value = cfgImportWav;
   cbImportLab.onClick = function () {
     cfgImportLab = cbImportLab.value;
     setSettingBool("importLab", cfgImportLab);
@@ -1673,69 +1689,72 @@
     );
   };
 
-  // B方式: 選択した音声レイヤーの隣にある同名 .lab/.txt を取り込む
+  // B方式: 選択した音声レイヤー（複数可）それぞれの隣にある同名 .lab/.txt を取り込む
   bulkSiblingBtn.onClick = function () {
     var comp = getActiveComp();
     if (!comp) {
       alert("コンポジションを開いてください");
       return;
     }
+    // ソースファイルを持つ選択レイヤーを全て対象にする
     var sel = comp.selectedLayers;
-    var layer = null;
-    var srcFile = null;
+    var targets = [];
     for (var i = 0; i < sel.length; i++) {
       var f = null;
       try {
         f = sel[i].source && sel[i].source.mainSource && sel[i].source.mainSource.file;
       } catch (e) {}
-      if (f) {
-        layer = sel[i];
-        srcFile = f;
-        break;
-      }
+      if (f) targets.push({ layer: sel[i], file: f });
     }
-    if (!layer || !srcFile) {
-      alert("ソースファイルのある音声/映像レイヤーを選択してください");
+    if (targets.length === 0) {
+      alert("ソースファイルのある音声/映像レイヤーを選択してください（複数可）");
       return;
     }
-    var base = fileBaseNoExt(decodeURI(srcFile.name));
-    var parent = srcFile.parent;
-    var labF = new File(parent.fsName + "/" + base + ".lab");
-    var txtF = new File(parent.fsName + "/" + base + ".txt");
     var t = readLabTimings();
-    var attach = layer.inPoint;
-    var didLab = false;
-    var didTxt = false;
+    var labCount = 0;
+    var txtCount = 0;
+    var noneCount = 0;
     beginUndo("lab2layer: 隣接ファイル取込");
     try {
-      if (cfgImportLab && labF.exists) {
-        didLab = placeLabFileOnLayer(
-          layer,
-          attach,
-          labF,
-          base,
-          t.offsetSec,
-          cfgLabAutoClose
-        );
-      }
-      if (cfgImportTxt && txtF.exists) {
-        var txt = readTextFileBestEffort(txtF);
-        if (txt.length > 0) {
-          var tl = comp.layers.addText(txt);
-          tl.startTime = attach;
-          didTxt = true;
+      for (var k = 0; k < targets.length; k++) {
+        var layer = targets[k].layer;
+        var srcFile = targets[k].file;
+        var base = fileBaseNoExt(decodeURI(srcFile.name));
+        var parent = srcFile.parent;
+        var labF = new File(parent.fsName + "/" + base + ".lab");
+        var txtF = new File(parent.fsName + "/" + base + ".txt");
+        var attach = layer.inPoint;
+        var any = false;
+        if (cfgImportLab && labF.exists) {
+          if (
+            placeLabFileOnLayer(layer, attach, labF, base, t.offsetSec, cfgLabAutoClose)
+          ) {
+            labCount++;
+            any = true;
+          }
         }
+        if (cfgImportTxt && txtF.exists) {
+          var txt = readTextFileBestEffort(txtF);
+          if (txt.length > 0) {
+            var tl = comp.layers.addText(txt);
+            tl.startTime = attach;
+            txtCount++;
+            any = true;
+          }
+        }
+        if (!any) noneCount++;
       }
     } finally {
       endUndo();
     }
     alert(
-      "隣接ファイル取込（" +
-        base +
-        "）\n口パク(lab): " +
-        (didLab ? "配置" : labF.exists ? "失敗" : "なし") +
-        "\nテキスト(txt): " +
-        (didTxt ? "配置" : txtF.exists ? "失敗" : "なし")
+      "隣接ファイル取込（対象 " +
+        targets.length +
+        " レイヤー）\n口パク(lab): " +
+        labCount +
+        " / テキスト(txt): " +
+        txtCount +
+        (noneCount > 0 ? "\n隣に該当ファイルが無かった: " + noneCount : "")
     );
   };
 
@@ -3846,11 +3865,9 @@
       "var cycle = Math.floor(time / interval);",
       "var phase = Math.max(phaseFor(blinkAt(cycle)), phaseFor(blinkAt(cycle - 1)));",
       "if (!hasMid && phase === 1) phase = 2;",
-      "function blinkVisible() {",
-      '  if (role === "closed") return phase === 2;',
-      '  if (role === "mid") return phase === 1;',
-      "  return false;",
-      "}",
+      // このレイヤーが受け持つ位相（開き=0 / 中間=1 / 閉じ=2）。
+      // phase は単一値なので「phase === rolePhase」で必ず1枚だけが一致＝排他確定。
+      'var rolePhase = (role === "open") ? 0 : (role === "mid") ? 1 : 2;',
     ]);
 
     if (emoCtx) {
@@ -3867,15 +3884,10 @@
         "  }",
         "}",
         "var result;",
-        // マーカー未設定(null)や「何も選択されていない空集合("")」のときは、
-        // 目が消えないよう単独でまばたきさせる（立ち絵で目が未選択でも瞬きは出す）
-        'if (markerName === null || markerName === "") {',
-        '  result = (role === "open") ? (phase === 0 ? 100 : 0) : (blinkVisible() ? 100 : 0);',
-        "} else if (blinkEnabled) {",
-        // 開き目表情が選択中＝この目グループは「開き＋まばたき」。membership は見ず
-        // 位相だけで1枚に確定する（開き=phase0 / 中間=phase1 / 閉じ=phase2）。
-        // これでマーカーに他の目名が混ざっても開き/中間/閉じは決して重ならない。
-        '  result = (role === "open") ? (phase === 0 ? 100 : 0) : (blinkVisible() ? 100 : 0);',
+        // マーカー未設定/空、または開き目表情が選択中なら、membership は見ず位相だけで
+        // 1枚に確定する（開き=phase0 / 中間=phase1 / 閉じ=phase2）。重なり/隙間とも起きない。
+        'if (markerName === null || markerName === "" || blinkEnabled) {',
+        "  result = (phase === rolePhase) ? 100 : 0;",
         "} else {",
         // 開き目以外が選択されている＝この目を直接指定。集合に自分が居れば表示
         '  result = ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
@@ -3884,13 +3896,8 @@
       ]);
     } else {
       lines = lines.concat([
-        "var result;",
-        "if (phase > 0) {",
-        "  result = blinkVisible() ? 100 : 0;",
-        "} else {",
-        '  result = role === "open" ? 100 : 0;',
-        "}",
-        "result;",
+        // 単独まばたき。位相一致で1枚に確定（開き=phase0 / 中間=phase1 / 閉じ=phase2）
+        "(phase === rolePhase) ? 100 : 0;",
       ]);
     }
 
@@ -4786,8 +4793,8 @@
         }
 
         var choiceIndent = indent + 26;
-        // 折り返し幅は控えめに見積もる（はみ出し防止のため安全マージンを引く）
-        var avail = availBase - choiceIndent - 24;
+        // 折り返し幅。安全マージンは小さめにして横幅を有効活用する
+        var avail = availBase - choiceIndent - 8;
         if (avail < 80) avail = 80;
         var curRow = null;
         var curW = 0;
@@ -4803,7 +4810,8 @@
           var dispLabel =
             items[ci].ch.label +
             (curSuffix ? " " + flipGlyph(curSuffix) : "");
-          var est = dispLabel.length * 18 + 40 + (hasFlips ? 8 : 0);
+          // ボタン幅の見積もり（全角想定で控えめ過ぎると6割しか使わないので実寸に寄せる）
+          var est = dispLabel.length * 13 + 28 + (hasFlips ? 8 : 0);
           if (curRow === null || (curW + est > avail && curW > 0)) {
             curRow = block.add("group");
             curRow.orientation = "row";
@@ -4965,7 +4973,19 @@
 
     var names = [];
     for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
-    var prefix = rootComp ? rootComp.name + "_" : detectCommonPrefix(names);
+    // 表示名の短縮prefix。ルート選択に依存せず短縮できるよう、ルート以外の
+    // ノード名の共通prefixを優先（例: 子が全て "T_Mhime_*" なら "T_Mhime_" を剥がす）。
+    // 求まらなければ rootComp 名、それも無ければ全体の共通prefixにフォールバック。
+    var rootName = rootComp ? rootComp.name : null;
+    var childNames = [];
+    for (i = 0; i < stageNodes.length; i++) {
+      if (stageNodes[i].comp.name !== rootName) {
+        childNames.push(stageNodes[i].comp.name);
+      }
+    }
+    var prefix = detectCommonPrefix(childNames);
+    if (!prefix && rootName) prefix = rootName + "_";
+    if (!prefix) prefix = detectCommonPrefix(names);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
       nd.displayName = parsePsdLayerName(
