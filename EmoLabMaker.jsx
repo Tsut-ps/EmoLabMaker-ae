@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.18.1
+ * @version 1.18.2
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -3546,8 +3546,9 @@
         "  }",
         "}",
         "var result;",
-        "if (markerName === null) {",
-        // マーカー未設定でも目が消えないよう、単独でまばたきさせる
+        // マーカー未設定(null)や「何も選択されていない空集合("")」のときは、
+        // 目が消えないよう単独でまばたきさせる（立ち絵で目が未選択でも瞬きは出す）
+        'if (markerName === null || markerName === "") {',
         '  result = phase > 0 ? (blinkVisible() ? 100 : 0) : (role === "open" ? 100 : 0);',
         "} else if (blinkEnabled && phase > 0) {",
         "  result = blinkVisible() ? 100 : 0;",
