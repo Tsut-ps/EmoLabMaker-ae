@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.18.2
+ * @version 1.19.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -62,6 +62,11 @@
   var cfgLabOffsetMs = getSettingNum("labOffsetMs", 0); // 全体シフト（映像先行）
   // ラボの終了時刻に「閉じ音素」を自動追加（末尾の口が開いたまま残るのを防ぐ）
   var cfgLabAutoClose = getSettingBool("labAutoClose", true);
+
+  // ファイル一括読み込みで配置する対象（永続化）
+  var cfgImportLab = getSettingBool("importLab", true); // .lab → 口パクマーカー
+  var cfgImportTxt = getSettingBool("importTxt", true); // .txt → テキスト(字幕)レイヤー
+  var cfgImportWav = getSettingBool("importWav", true); // .wav → 音声レイヤー
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -1560,6 +1565,180 @@
   browseBtn.alignment = ["right", "center"];
   browseBtn.helpTip = "labファイルを選択";
 
+  // ========== ファイル一括読み込み (wav/txt/lab) ==========
+  var bulkPanel = tabLab.add(
+    "panel",
+    undefined,
+    "ファイル一括読み込み (wav/txt/lab)"
+  );
+  bulkPanel.orientation = "column";
+  bulkPanel.alignChildren = ["fill", "top"];
+  bulkPanel.alignment = ["fill", "top"];
+  bulkPanel.spacing = 4;
+  bulkPanel.margins = 10;
+
+  var bulkOptRow = bulkPanel.add("group");
+  bulkOptRow.orientation = "row";
+  bulkOptRow.alignChildren = ["left", "center"];
+  bulkOptRow.spacing = 8;
+  bulkOptRow.add("statictext", undefined, "配置:");
+  var cbImportLab = bulkOptRow.add("checkbox", undefined, "口パク(lab)");
+  cbImportLab.value = cfgImportLab;
+  var cbImportTxt = bulkOptRow.add("checkbox", undefined, "テキスト(txt)");
+  cbImportTxt.value = cfgImportTxt;
+  var cbImportWav = bulkOptRow.add("checkbox", undefined, "音声(wav)");
+  cbImportWav.value = cfgImportWav;
+  cbImportLab.onClick = function () {
+    cfgImportLab = cbImportLab.value;
+    setSettingBool("importLab", cfgImportLab);
+  };
+  cbImportTxt.onClick = function () {
+    cfgImportTxt = cbImportTxt.value;
+    setSettingBool("importTxt", cfgImportTxt);
+  };
+  cbImportWav.onClick = function () {
+    cfgImportWav = cbImportWav.value;
+    setSettingBool("importWav", cfgImportWav);
+  };
+
+  var bulkBtnRow = bulkPanel.add("group");
+  bulkBtnRow.orientation = "row";
+  bulkBtnRow.alignChildren = ["fill", "center"];
+  bulkBtnRow.alignment = ["fill", "top"];
+  bulkBtnRow.spacing = 5;
+  var bulkPickBtn = bulkBtnRow.add("button", undefined, "ファイルを選択して配置");
+  bulkPickBtn.helpTip =
+    "wav/txt/lab をまとめて選択し、同名どうしを1組として現在のコンポに配置（A方式）";
+  var bulkSiblingBtn = bulkBtnRow.add("button", undefined, "選択音声の隣を取込");
+  bulkSiblingBtn.helpTip =
+    "選択した音声レイヤーのソースと同じ名前の .lab/.txt が隣にあれば取り込む（B方式）";
+
+  bulkPanel.add(
+    "statictext",
+    undefined,
+    "テキストは UTF-8 のtxtをそのまま字幕レイヤーにします（連携は今後対応）"
+  );
+
+  // A方式: wav/txt/lab を複数選択して一括配置
+  bulkPickBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp) {
+      alert("配置先のコンポジションを開いてください");
+      return;
+    }
+    var files = File.openDialog(
+      "wav / txt / lab をまとめて選択",
+      undefined,
+      true
+    );
+    if (!files) return;
+    if (!(files instanceof Array)) files = [files];
+    var groups = groupFilesByBase(files);
+    if (groups.length === 0) {
+      alert("wav / txt / lab が選択されていません");
+      return;
+    }
+    var t = readLabTimings();
+    var opts = {
+      lab: cfgImportLab,
+      txt: cfgImportTxt,
+      wav: cfgImportWav,
+      offsetSec: t.offsetSec,
+      autoClose: cfgLabAutoClose,
+    };
+    var total = { wav: 0, txt: 0, lab: 0 };
+    beginUndo("lab2layer: ファイル一括読み込み");
+    try {
+      for (var i = 0; i < groups.length; i++) {
+        var r = importGroupFiles(comp, comp.time, groups[i], opts);
+        total.wav += r.wav;
+        total.txt += r.txt;
+        total.lab += r.lab;
+      }
+    } finally {
+      endUndo();
+    }
+    alert(
+      "配置完了（" +
+        groups.length +
+        " 組）\n音声: " +
+        total.wav +
+        " / テキスト: " +
+        total.txt +
+        " / 口パク: " +
+        total.lab +
+        (groups.length > 1
+          ? "\n※複数組は再生ヘッド位置に重なります。必要に応じて並べ替えてください"
+          : "")
+    );
+  };
+
+  // B方式: 選択した音声レイヤーの隣にある同名 .lab/.txt を取り込む
+  bulkSiblingBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp) {
+      alert("コンポジションを開いてください");
+      return;
+    }
+    var sel = comp.selectedLayers;
+    var layer = null;
+    var srcFile = null;
+    for (var i = 0; i < sel.length; i++) {
+      var f = null;
+      try {
+        f = sel[i].source && sel[i].source.mainSource && sel[i].source.mainSource.file;
+      } catch (e) {}
+      if (f) {
+        layer = sel[i];
+        srcFile = f;
+        break;
+      }
+    }
+    if (!layer || !srcFile) {
+      alert("ソースファイルのある音声/映像レイヤーを選択してください");
+      return;
+    }
+    var base = fileBaseNoExt(decodeURI(srcFile.name));
+    var parent = srcFile.parent;
+    var labF = new File(parent.fsName + "/" + base + ".lab");
+    var txtF = new File(parent.fsName + "/" + base + ".txt");
+    var t = readLabTimings();
+    var attach = layer.inPoint;
+    var didLab = false;
+    var didTxt = false;
+    beginUndo("lab2layer: 隣接ファイル取込");
+    try {
+      if (cfgImportLab && labF.exists) {
+        didLab = placeLabFileOnLayer(
+          layer,
+          attach,
+          labF,
+          base,
+          t.offsetSec,
+          cfgLabAutoClose
+        );
+      }
+      if (cfgImportTxt && txtF.exists) {
+        var txt = readTextFileBestEffort(txtF);
+        if (txt.length > 0) {
+          var tl = comp.layers.addText(txt);
+          tl.startTime = attach;
+          didTxt = true;
+        }
+      }
+    } finally {
+      endUndo();
+    }
+    alert(
+      "隣接ファイル取込（" +
+        base +
+        "）\n口パク(lab): " +
+        (didLab ? "配置" : labF.exists ? "失敗" : "なし") +
+        "\nテキスト(txt): " +
+        (didTxt ? "配置" : txtF.exists ? "失敗" : "なし")
+    );
+  };
+
   // ========== 音素リストグループ ==========
   var phonemeListPanel = tabLab.add("panel", undefined, "音素を選択");
   phonemeListPanel.orientation = "column";
@@ -1662,6 +1841,64 @@
     return entries;
   }
 
+  // ── ファイル一括読み込み用ヘルパー（純粋・テスト可能） ──
+  // 拡張子を除いた basename（パス区切りも除去）
+  function fileBaseNoExt(name) {
+    var n = String(name);
+    var slash = Math.max(n.lastIndexOf("/"), n.lastIndexOf("\\"));
+    if (slash >= 0) n = n.substring(slash + 1);
+    var dot = n.lastIndexOf(".");
+    return dot > 0 ? n.substring(0, dot) : n;
+  }
+  function fileExtLower(name) {
+    var n = String(name);
+    var dot = n.lastIndexOf(".");
+    return dot >= 0 ? n.substring(dot + 1).toLowerCase() : "";
+  }
+
+  // File 配列を basename でグループ化し {base, wav, txt, lab} の配列にする。
+  // 同じ basename の wav/txt/lab をひとまとめにする（出現順を維持）。
+  function groupFilesByBase(files) {
+    var map = {};
+    var order = [];
+    for (var i = 0; i < files.length; i++) {
+      var f = files[i];
+      var nm = decodeURI(f.name);
+      var ext = fileExtLower(nm);
+      if (ext !== "wav" && ext !== "txt" && ext !== "lab") continue;
+      var base = fileBaseNoExt(nm);
+      if (!map[base]) {
+        map[base] = { base: base, wav: null, txt: null, lab: null };
+        order.push(base);
+      }
+      if (ext === "wav") map[base].wav = f;
+      else if (ext === "txt") map[base].txt = f;
+      else map[base].lab = f;
+    }
+    var out = [];
+    for (var k = 0; k < order.length; k++) out.push(map[order[k]]);
+    return out;
+  }
+
+  // parseLabPhonemeEntries の結果を「出現順の {startTime,endTime,phoneme} 配列」に展開
+  function flattenLabEntries(entries) {
+    var out = [];
+    for (var i = 0; i < entries.length; i++) {
+      var e = entries[i];
+      for (var j = 0; j < e.times.length; j++) {
+        out.push({
+          startTime: e.times[j].start,
+          endTime: e.times[j].end,
+          phoneme: e.phoneme,
+        });
+      }
+    }
+    out.sort(function (a, b) {
+      return a.startTime - b.startTime;
+    });
+    return out;
+  }
+
   // 発話終了時に打つ「閉じ音素」。どの母音にも属さない pau を使い、閉じ口へ戻す。
   var LAB_CLOSE_PHONEME = "pau";
 
@@ -1711,6 +1948,84 @@
       }
     }
     return { autoClosed: autoClosed };
+  }
+
+  // テキストファイルを読む（UTF-8 優先。SJIS 等は文字化けし得る＝簡易版）
+  function readTextFileBestEffort(file) {
+    var s = "";
+    try {
+      file.open("r");
+      file.encoding = "UTF-8";
+      s = file.read();
+      file.close();
+    } catch (e) {
+      try {
+        file.close();
+      } catch (e2) {}
+    }
+    return s;
+  }
+
+  // .lab ファイルを読み、target レイヤーに口パクマーカーを配置する
+  function placeLabFileOnLayer(targetLayer, attachTime, labFileObj, base, offsetSec, autoClose) {
+    var content = "";
+    try {
+      labFileObj.open("r");
+      content = labFileObj.read();
+      labFileObj.close();
+    } catch (e) {
+      return false;
+    }
+    var phs = flattenLabEntries(parseLabPhonemeEntries(content));
+    if (phs.length === 0) return false;
+    if (targetLayer.name.indexOf("[Lab] ") !== 0) {
+      targetLayer.name = "[Lab] " + base;
+    }
+    writeLabMarkers(
+      targetLayer,
+      attachTime,
+      phs[0].startTime,
+      phs,
+      offsetSec,
+      autoClose
+    );
+    return true;
+  }
+
+  // 1グループ（同名の wav/txt/lab）をコンプに配置する（方式A）。
+  // opts: { lab, txt, wav, offsetSec, autoClose }
+  function importGroupFiles(comp, attachTime, group, opts) {
+    var rep = { wav: 0, txt: 0, lab: 0 };
+    var audioLayer = null;
+    if (opts.wav && group.wav && group.wav.exists) {
+      try {
+        var item = app.project.importFile(new ImportOptions(group.wav));
+        audioLayer = comp.layers.add(item);
+        audioLayer.startTime = attachTime;
+        rep.wav++;
+      } catch (e) {}
+    }
+    if (opts.lab && group.lab && group.lab.exists) {
+      var target = audioLayer;
+      if (!target) {
+        target = comp.layers.addNull(comp.duration);
+        target.startTime = attachTime;
+      }
+      if (placeLabFileOnLayer(target, attachTime, group.lab, group.base, opts.offsetSec, opts.autoClose)) {
+        rep.lab++;
+      }
+    }
+    if (opts.txt && group.txt && group.txt.exists) {
+      try {
+        var t = readTextFileBestEffort(group.txt);
+        if (t.length > 0) {
+          var tl = comp.layers.addText(t);
+          tl.startTime = attachTime;
+          rep.txt++;
+        }
+      } catch (e3) {}
+    }
+    return rep;
   }
 
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
