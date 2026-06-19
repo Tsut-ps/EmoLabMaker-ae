@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.16.0
+ * @version 1.17.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -60,8 +60,6 @@
 
   // 口パクのタイミング設定（ミリ秒。起動時に読み込み・変更時に永続化）
   var cfgLabOffsetMs = getSettingNum("labOffsetMs", 0); // 全体シフト（映像先行）
-  var cfgLabHeadMs = getSettingNum("labHeadMs", 0); // 開始を遅らせる前マージン
-  var cfgLabTailMs = getSettingNum("labTailMs", 0); // 終了を早める後トリム
   // ラボの終了時刻に「閉じ音素」を自動追加（末尾の口が開いたまま残るのを防ぐ）
   var cfgLabAutoClose = getSettingBool("labAutoClose", true);
 
@@ -149,6 +147,33 @@
     if (rootLevel.length > 0) return rootLevel;
     var ac = getActiveComp();
     return ac ? [ac] : [];
+  }
+
+  // コンポが PSD の「XXXX レイヤー / XXXX Layers」フォルダの中にあるか
+  function isInsidePsdLayersFolder(comp) {
+    try {
+      var p = comp.parentFolder;
+      if (!p || p === app.project.rootFolder) return false;
+      var nm = String(p.name || "");
+      return (
+        (nm.length >= 5 && nm.substring(nm.length - 5) === " レイヤー") ||
+        (nm.length >= 7 && nm.substring(nm.length - 7) === " Layers")
+      );
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 制御コンポ候補 = どのコンポでも可。ただし PSD 内部の「XXXX レイヤー」
+  // フォルダ内のコンポ（反転バリエーション等の内部グループ）は除外する。
+  function collectCtrlCandidates() {
+    var all = getProjectComps();
+    var out = [];
+    for (var i = 0; i < all.length; i++) {
+      if (isInsidePsdLayersFolder(all[i])) continue;
+      out.push(all[i]);
+    }
+    return out;
   }
 
   function findCompByName(name) {
@@ -1115,10 +1140,10 @@
     dropdown.selection = 0;
   }
 
-  // PSDタブ用: 現在開いているコンポとその中身（ネストされたコンポ）だけを列挙する
-  function rebuildPsdDropdown(dropdown, selectedName) {
-    // PSD 立ち絵ルート候補のみを表示する（プロジェクト直下の PSD 由来/設定済みコンポ）。
-    var comps = collectPsdRootCandidates();
+  // PSDタブ用: 候補コンポ(comps)をドロップダウンに並べる。
+  // comps 省略時は PSD 立ち絵ルート候補（ルート用）。
+  function rebuildPsdDropdown(dropdown, selectedName, comps) {
+    if (!comps) comps = collectPsdRootCandidates();
     dropdown.removeAll();
     for (var i = 0; i < comps.length; i++) {
       dropdown.add("item", comps[i].name);
@@ -1645,10 +1670,7 @@
    * selectedPhonemes は {startTime,endTime,phoneme} の配列（開始時間順）。
    *   autoClose: ラボ終了時刻（最後の endTime）に閉じ音素を自動追加し、
    *              発話後に口を閉じる（末尾の口が開いたまま残るのを防ぐ）。
-   *   headSec/tailSec: [Lab] の in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める
-   *     （範囲外は findPhonemeLayer が無視＝閉じ口/立ち絵に戻る）。音声・映像
-   *     レイヤーでも適用するため音声の頭/尾も同じだけ切れる。
-   * 戻り値: { trimmed: bool, hasMedia: bool, autoClosed: bool }
+   * 戻り値: { autoClosed: bool }
    */
   function writeLabMarkers(
     targetLayer,
@@ -1656,8 +1678,6 @@
     labStartTime,
     selectedPhonemes,
     offsetSec,
-    headSec,
-    tailSec,
     autoClose
   ) {
     var markers = targetLayer.property("Marker");
@@ -1680,40 +1700,17 @@
     }
 
     // ラボ終了が明確なら、その時刻に閉じ音素を打って発話後に口を閉じる
-    var closeTime = null;
     var autoClosed = false;
-    if (firstTime !== null && maxEndRel !== null) {
-      closeTime = attachTime + maxEndRel + offsetSec;
-      if (autoClose && closeTime > lastTime + MARKER_EPSILON) {
+    if (autoClose && firstTime !== null && maxEndRel !== null) {
+      var closeTime = attachTime + maxEndRel + offsetSec;
+      if (closeTime > lastTime + MARKER_EPSILON) {
         targetLayer
           .property("Marker")
           .setValueAtTime(closeTime, new MarkerValue(LAB_CLOSE_PHONEME));
         autoClosed = true;
       }
     }
-
-    headSec = headSec || 0;
-    tailSec = tailSec || 0;
-    var hasMedia = false;
-    try {
-      hasMedia = !!(targetLayer.hasAudio || targetLayer.source);
-    } catch (e) {}
-    var trimmed = false;
-    if ((headSec > 0 || tailSec > 0) && firstTime !== null) {
-      // in/out を頭/尾ぶん詰めて口パクの有効範囲を狭める（範囲外は閉じ口/立ち絵）。
-      // 終端はラボ終了(closeTime)を基準にする。
-      var endBase = closeTime !== null ? closeTime : lastTime;
-      var newIn = firstTime + headSec;
-      var newOut = endBase - tailSec;
-      if (newOut > newIn) {
-        try {
-          targetLayer.inPoint = newIn;
-          targetLayer.outPoint = newOut;
-          trimmed = true;
-        } catch (e2) {}
-      }
-    }
-    return { trimmed: trimmed, hasMedia: hasMedia, autoClosed: autoClosed };
+    return { autoClosed: autoClosed };
   }
 
   // よく使う音素を先頭に並べ、それ以外は出現回数の多い順で続ける
@@ -1948,40 +1945,16 @@
   framePlus.alignment = ["left", "center"];
   framePlus.helpTip = "1フレーム進める";
 
-  offsetGroup.add("statictext", undefined, "頭(ms)");
-  var headInput = offsetGroup.add("edittext", undefined, String(cfgLabHeadMs));
-  headInput.preferredSize = [44, 25];
-  headInput.helpTip =
-    "口パク開始の前カット。先頭この時間ぶんは口パクせず閉じ口/立ち絵（[Lab]のインを詰める）。音声レイヤーだと音声の頭も切れます";
-
-  offsetGroup.add("statictext", undefined, "尾(ms)");
-  var tailInput = offsetGroup.add("edittext", undefined, String(cfgLabTailMs));
-  tailInput.preferredSize = [44, 25];
-  tailInput.helpTip =
-    "口パク終了の後カット。末尾この時間ぶんは口パクせず閉じ口/立ち絵（[Lab]のアウトを詰める）。音声レイヤーだと音声の尾も切れます";
-
-  // 入力値を読み取り、範囲を整え、永続化するヘルパー
+  // オフセット値を読み取り、整え、永続化するヘルパー
   function readLabTimings() {
     var off = parseFloat(offsetInput.text);
-    var head = parseFloat(headInput.text);
-    var tail = parseFloat(tailInput.text);
     if (isNaN(off)) off = 0;
-    if (isNaN(head) || head < 0) head = 0;
-    if (isNaN(tail) || tail < 0) tail = 0;
     cfgLabOffsetMs = off;
-    cfgLabHeadMs = head;
-    cfgLabTailMs = tail;
     offsetInput.text = String(off);
-    headInput.text = String(head);
-    tailInput.text = String(tail);
     setSettingNum("labOffsetMs", off);
-    setSettingNum("labHeadMs", head);
-    setSettingNum("labTailMs", tail);
-    return { offsetSec: off / 1000, headSec: head / 1000, tailSec: tail / 1000 };
+    return { offsetSec: off / 1000 };
   }
   offsetInput.onChange = readLabTimings;
-  headInput.onChange = readLabTimings;
-  tailInput.onChange = readLabTimings;
 
   var autoCloseCheck = offsetGroup.add(
     "checkbox",
@@ -2621,16 +2594,13 @@
       // タイミング設定を取得（ミリ秒→秒）。読み取り時に永続化もされる
       var t = readLabTimings();
 
-      // 既存マーカーを削除して配置（共通関数）。頭/尾で in/out を詰め、
-      // 終了が明確なら閉じ音素を自動追加する
+      // 既存マーカーを削除して配置（共通関数）。終了が明確なら閉じ音素を自動追加する
       var placeResult = writeLabMarkers(
         targetLayer,
         attachTime,
         labStartTime,
         selectedPhonemes,
         t.offsetSec,
-        t.headSec,
-        t.tailSec,
         cfgLabAutoClose
       );
     } finally {
@@ -2646,15 +2616,6 @@
       "s\n" +
       "対象: " +
       targetLayer.name;
-    if ((cfgLabHeadMs > 0 || cfgLabTailMs > 0) && placeResult) {
-      if (placeResult.trimmed) {
-        message +=
-          "\n頭/尾トリム: 頭 " + cfgLabHeadMs + "ms / 尾 " + cfgLabTailMs + "ms";
-        if (placeResult.hasMedia) {
-          message += "（音声・映像レイヤーのため音声も同じだけ切れます）";
-        }
-      }
-    }
     if (placeResult && placeResult.autoClosed) {
       message += "\n終了に閉じ口(pau)を自動追加しました";
     }
@@ -3448,7 +3409,7 @@
 
   var psdCtrlRow = addPsdCompRow("制御");
   psdCtrlRow.dropdown.helpTip =
-    "表情マーカーを書き込むコンポ（通常はルートと同じでOK）";
+    "表情マーカーを書き込むコンポ（どのコンポでも可。通常はルートと同じでOK。PSDの「XXXX レイヤー」フォルダ内の内部コンポは除外）";
 
   var psdSetupBtn = tabPsd.add(
     "button",
@@ -3858,7 +3819,11 @@
       ? psdCtrlRow.dropdown.selection.text
       : null;
     rebuildPsdDropdown(psdRootRow.dropdown, rootCur);
-    rebuildPsdDropdown(psdCtrlRow.dropdown, ctrlCur);
+    rebuildPsdDropdown(
+      psdCtrlRow.dropdown,
+      ctrlCur,
+      collectCtrlCandidates()
+    );
     if (psdRootRow.dropdown.items.length === 0) {
       psdStatusText.text =
         "PSD 立ち絵コンポが見つかりません。PSD を「コンポジション」として読み込んでください。";
@@ -4923,7 +4888,7 @@
     rebuildDropdown(targetRow.dropdown, name);
     rebuildDropdown(ctrlRow.dropdown, name);
     rebuildPsdDropdown(psdRootRow.dropdown, name);
-    rebuildPsdDropdown(psdCtrlRow.dropdown, name);
+    rebuildPsdDropdown(psdCtrlRow.dropdown, name, collectCtrlCandidates());
     rebuildStageRootDropdown(name);
     rebuildList();
     refreshStage(false);
