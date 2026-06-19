@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.17.0
+ * @version 1.18.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -1860,16 +1860,56 @@
     return lines.join("\n");
   }
 
+  // [Lab] 音素レイヤーを含むコンポを列挙する
+  function findLabComps() {
+    var out = [];
+    var comps = getProjectComps();
+    for (var i = 0; i < comps.length; i++) {
+      var c = comps[i];
+      for (var j = 1; j <= c.numLayers; j++) {
+        if (c.layer(j).name.indexOf("[Lab] ") === 0) {
+          out.push(c);
+          break;
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * 音素ソース（[Lab] のあるコンポ）を自動検出して返す。
+   *   0 個 → 警告して null（先に「音素配置」が必要）
+   *   1 個 → 自動採用
+   *   複数 → [Lab] を含むコンポだけから選ばせる（preferName を既定に）
+   * これで「[Lab] の無い間違ったコンポ」を指定する事故を防ぐ。
+   */
+  function resolvePhonemeComp(preferName) {
+    var labComps = findLabComps();
+    if (labComps.length === 0) {
+      alert(
+        "音素レイヤー [Lab] が見つかりません。\n先に「音素配置」で [Lab] を作成してください。"
+      );
+      return null;
+    }
+    if (labComps.length === 1) return labComps[0].name;
+    var names = [];
+    for (var i = 0; i < labComps.length; i++) names.push(labComps[i].name);
+    return promptForPhonemeComp(preferName, names);
+  }
+
   /**
    * 音素レイヤー（[Lab]）のあるコンポを選ばせるダイアログ。
+   * compNames を渡せばその候補だけ（検証済み）から選ばせる。
    * 確定したらコンポ名、キャンセルなら null を返す。
    */
-  function promptForPhonemeComp(defaultName) {
-    var compNames = [];
-    for (var i = 1; i <= app.project.numItems; i++) {
-      var item = app.project.item(i);
-      if (item instanceof CompItem) {
-        compNames.push(item.name);
+  function promptForPhonemeComp(defaultName, compNames) {
+    if (!compNames) {
+      compNames = [];
+      for (var i = 1; i <= app.project.numItems; i++) {
+        var item = app.project.item(i);
+        if (item instanceof CompItem) {
+          compNames.push(item.name);
+        }
       }
     }
 
@@ -2211,7 +2251,7 @@
     }
 
     var activeComp = getActiveComp();
-    var phonemeCompName = promptForPhonemeComp(
+    var phonemeCompName = resolvePhonemeComp(
       activeComp ? activeComp.name : null
     );
     if (!phonemeCompName) return;
@@ -2636,7 +2676,7 @@
       return;
     }
 
-    var targetCompName = promptForPhonemeComp(comp.name);
+    var targetCompName = resolvePhonemeComp(comp.name);
     if (!targetCompName) return;
 
     beginUndo("lab2layer: Setup Phoneme Opacity");
