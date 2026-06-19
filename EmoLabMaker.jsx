@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.18.0
+ * @version 1.18.1
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -1877,24 +1877,23 @@
   }
 
   /**
-   * 音素ソース（[Lab] のあるコンポ）を自動検出して返す。
-   *   0 個 → 警告して null（先に「音素配置」が必要）
+   * 音素ソース（[Lab] のあるコンポ）を解決して返す。
    *   1 個 → 自動採用
    *   複数 → [Lab] を含むコンポだけから選ばせる（preferName を既定に）
-   * これで「[Lab] の無い間違ったコンポ」を指定する事故を防ぐ。
+   *   0 個 → [Lab] 未配置でも止めず、全コンポから選ばせる
+   *          （合成式は実行時に [Lab] を探すので、後から配置すれば動く）
+   * [Lab] があれば「間違ったコンポ指定」を防ぎつつ、配置は必須にしない。
    */
   function resolvePhonemeComp(preferName) {
     var labComps = findLabComps();
-    if (labComps.length === 0) {
-      alert(
-        "音素レイヤー [Lab] が見つかりません。\n先に「音素配置」で [Lab] を作成してください。"
-      );
-      return null;
-    }
     if (labComps.length === 1) return labComps[0].name;
-    var names = [];
-    for (var i = 0; i < labComps.length; i++) names.push(labComps[i].name);
-    return promptForPhonemeComp(preferName, names);
+    if (labComps.length > 1) {
+      var names = [];
+      for (var i = 0; i < labComps.length; i++) names.push(labComps[i].name);
+      return promptForPhonemeComp(preferName, names);
+    }
+    // [Lab] 未配置: ブロックせず、配置予定のコンポを選ばせる
+    return promptForPhonemeComp(preferName);
   }
 
   /**
@@ -1917,7 +1916,11 @@
     dialog.orientation = "column";
     dialog.alignChildren = ["fill", "top"];
 
-    dialog.add("statictext", undefined, "[Lab] 音素レイヤーのある場所:");
+    dialog.add(
+      "statictext",
+      undefined,
+      "[Lab] 音素レイヤーのある場所（未配置なら配置予定のコンポ）:"
+    );
     var compDropdown = dialog.add("dropdownlist", undefined, compNames);
 
     for (var j = 0; j < compNames.length; j++) {
@@ -2277,13 +2280,26 @@
       }
     }
 
-    // グループ優先: 同じコンポ内の「他の表情登録済み口レイヤー」も発話中は隠す
-    // （myCsv 空＝どの音素にも一致しないので発話中は非表示、無音中は表情に従う）。
-    // これで「口パクの口」と「立ち絵で選んだ休め口」が二重に出るのを防ぐ。
+    // グループ優先: 割り当て済みレイヤーが「実際に入っているコンポ」の中だけを対象に、
+    // 他の表情登録済み口レイヤーも発話中は隠す（開いているコンポには依存しない）。
+    // ※ getActiveComp() を見ると、別コンポを開いて適用したとき無関係なレイヤーに
+    //   口パク式を付けてしまい二重表示の原因になるため containingComp を使う。
+    var targetComps = [];
+    var seenComp = {};
+    for (var mi = 0; mi < items.length; mi++) {
+      try {
+        var cc = items[mi].layer.containingComp;
+        if (cc && !seenComp[cc.id]) {
+          seenComp[cc.id] = true;
+          targetComps.push(cc);
+        }
+      } catch (eCc) {}
+    }
     var suppressCount = 0;
-    if (activeComp) {
-      for (var s = 1; s <= activeComp.numLayers; s++) {
-        var sly = activeComp.layer(s);
+    for (var tc = 0; tc < targetComps.length; tc++) {
+      var gcomp = targetComps[tc];
+      for (var s = 1; s <= gcomp.numLayers; s++) {
+        var sly = gcomp.layer(s);
         if (isSystemLayerName(sly.name)) continue;
         if (mappedNames[sly.name]) continue;
         if (!isRegistered(sly)) continue; // 表情登録済みのみ対象
