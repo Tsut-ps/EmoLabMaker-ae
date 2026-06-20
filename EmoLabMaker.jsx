@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.20.0
+ * @version 1.21.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -1560,8 +1560,17 @@
   //
   // ════════════════════════════════════════════════════════════════
 
+  // ========== 音素マーカー (lab) パネル ==========
+  // labファイル選択 → 音素選択 → タイミング → 音素配置 を1つにまとめ、関係を明確にする
+  var labPanel = tabLab.add("panel", undefined, "音素マーカー (lab)");
+  labPanel.orientation = "column";
+  labPanel.alignChildren = ["fill", "top"];
+  labPanel.alignment = ["fill", "top"];
+  labPanel.spacing = 5;
+  labPanel.margins = 10;
+
   // ========== ファイル選択グループ ==========
-  var fileSelectGroup = tabLab.add("group");
+  var fileSelectGroup = labPanel.add("group");
   fileSelectGroup.orientation = "row";
   fileSelectGroup.alignChildren = ["left", "center"];
   fileSelectGroup.alignment = ["fill", "top"];
@@ -1759,7 +1768,7 @@
   };
 
   // ========== 音素リストグループ ==========
-  var phonemeListPanel = tabLab.add("panel", undefined, "音素を選択");
+  var phonemeListPanel = labPanel.add("panel", undefined, "音素を選択");
   phonemeListPanel.orientation = "column";
   phonemeListPanel.alignChildren = ["fill", "top"];
   phonemeListPanel.alignment = ["fill", "top"];
@@ -2298,7 +2307,7 @@
   deselectAllBtn.alignment = ["fill", "center"];
 
   // ========== タイミング設定グループ（全て app.settings で永続化） ==========
-  var offsetGroup = tabLab.add("group");
+  var offsetGroup = labPanel.add("group");
   offsetGroup.orientation = "row";
   offsetGroup.alignment = ["fill", "top"];
   offsetGroup.alignChildren = ["left", "center"];
@@ -2442,66 +2451,135 @@
   var mouthMapHint = mouthMapPanel.add(
     "statictext",
     undefined,
-    "口コンポでレイヤーを選択して各行の「割当」→「適用」"
+    "口コンポでレイヤーを選択して各行の「割当」→「適用」。行は追加・削除でき、ラベルも自由"
   );
   mouthMapHint.alignment = ["fill", "top"];
 
+  // 口形の行はこのグループに動的に追加する（追加/削除に対応）
+  var mouthRowsGroup = mouthMapPanel.add("group");
+  mouthRowsGroup.orientation = "column";
+  mouthRowsGroup.alignChildren = ["fill", "top"];
+  mouthRowsGroup.alignment = ["fill", "top"];
+  mouthRowsGroup.spacing = 2;
+
   var mouthRows = [];
-  for (var msIdx = 0; msIdx < MOUTH_SHAPES.length; msIdx++) {
-    (function (shape) {
-      var row = mouthMapPanel.add("group");
-      row.orientation = "row";
-      row.alignment = ["fill", "top"];
-      row.alignChildren = ["left", "center"];
-      row.spacing = 4;
 
-      var lbl = row.add("statictext", undefined, shape.label);
-      lbl.preferredSize = [44, BUTTON_HEIGHT];
-
-      var csvInput = row.add("edittext", undefined, shape.preset);
-      csvInput.preferredSize = [104, BUTTON_HEIGHT];
-      csvInput.helpTip = "この口形で表示する音素（カンマ区切り）";
-
-      var assignBtn = row.add("button", undefined, "割当");
-      assignBtn.preferredSize = [48, BUTTON_HEIGHT];
-      assignBtn.helpTip = "アクティブコンポの選択レイヤーをこの口形に割当";
-
-      var clearBtn = row.add("button", undefined, "×");
-      clearBtn.preferredSize = [24, BUTTON_HEIGHT];
-      clearBtn.helpTip = "この口形の割当をクリア";
-
-      var namesText = row.add("statictext", undefined, "（未割当）");
-      namesText.alignment = ["fill", "center"];
-
-      var rowData = {
-        shape: shape,
-        csvInput: csvInput,
-        namesText: namesText,
-        layers: [],
-      };
-      mouthRows.push(rowData);
-
-      assignBtn.onClick = function () {
-        var comp = getActiveComp();
-        if (!comp || comp.selectedLayers.length === 0) {
-          alert("口形レイヤーを選択してください");
-          return;
-        }
-        rowData.layers = [];
-        for (var i = 0; i < comp.selectedLayers.length; i++) {
-          rowData.layers.push(comp.selectedLayers[i]);
-        }
-        namesText.text = describeAssignedLayers(rowData.layers);
-        namesText.helpTip = namesText.text;
-      };
-
-      clearBtn.onClick = function () {
-        rowData.layers = [];
-        namesText.text = "（未割当）";
-        namesText.helpTip = "";
-      };
-    })(MOUTH_SHAPES[msIdx]);
+  // ラベルから自動割当用のキーを取り出す（"ん(閉)" → ["ん","閉"]、"あ" → ["あ"]）
+  function mouthMatchKeys(label) {
+    var keys = [];
+    var s = String(label || "");
+    var before = s.replace(/[(（].*$/, "").replace(/^\s+|\s+$/g, "");
+    var inside = "";
+    var m = s.match(/[(（]([^)）]*)[)）]/);
+    if (m) inside = m[1].replace(/^\s+|\s+$/g, "");
+    if (before) keys.push(before);
+    if (inside) keys.push(inside);
+    if (keys.length === 0 && s) keys.push(s);
+    return keys;
   }
+
+  function addMouthRow(label, preset, isClosed) {
+    var row = mouthRowsGroup.add("group");
+    row.orientation = "row";
+    row.alignment = ["fill", "top"];
+    row.alignChildren = ["left", "center"];
+    row.spacing = 4;
+
+    var labelInput = row.add("edittext", undefined, label);
+    labelInput.preferredSize = [54, BUTTON_HEIGHT];
+    labelInput.helpTip = "口形の名前（自動割当・表示用。自由に変更可）";
+
+    var csvInput = row.add("edittext", undefined, preset);
+    csvInput.preferredSize = [96, BUTTON_HEIGHT];
+    csvInput.helpTip = "この口形で表示する音素（カンマ区切り）";
+
+    var closedCheck = row.add("checkbox", undefined, "閉");
+    closedCheck.value = !!isClosed;
+    closedCheck.helpTip =
+      "閉じ口: どの口形にも属さない音素（子音など）のときに表示";
+
+    var assignBtn = row.add("button", undefined, "割当");
+    assignBtn.preferredSize = [40, BUTTON_HEIGHT];
+    assignBtn.helpTip = "アクティブコンポの選択レイヤーをこの口形に割当";
+
+    var clearBtn = row.add("button", undefined, "×");
+    clearBtn.preferredSize = [22, BUTTON_HEIGHT];
+    clearBtn.helpTip = "この口形の割当をクリア";
+
+    var delBtn = row.add("button", undefined, "行削除");
+    delBtn.preferredSize = [44, BUTTON_HEIGHT];
+    delBtn.helpTip = "この口形の行を削除";
+
+    var namesText = row.add("statictext", undefined, "（未割当）");
+    namesText.alignment = ["fill", "center"];
+
+    var rowData = {
+      row: row,
+      labelInput: labelInput,
+      csvInput: csvInput,
+      closedCheck: closedCheck,
+      namesText: namesText,
+      preset: preset,
+      layers: [],
+    };
+    mouthRows.push(rowData);
+
+    assignBtn.onClick = function () {
+      var comp = getActiveComp();
+      if (!comp || comp.selectedLayers.length === 0) {
+        alert("口形レイヤーを選択してください");
+        return;
+      }
+      rowData.layers = [];
+      for (var i = 0; i < comp.selectedLayers.length; i++) {
+        rowData.layers.push(comp.selectedLayers[i]);
+      }
+      namesText.text = describeAssignedLayers(rowData.layers);
+      namesText.helpTip = namesText.text;
+    };
+
+    clearBtn.onClick = function () {
+      rowData.layers = [];
+      namesText.text = "（未割当）";
+      namesText.helpTip = "";
+    };
+
+    delBtn.onClick = function () {
+      for (var i = 0; i < mouthRows.length; i++) {
+        if (mouthRows[i] === rowData) {
+          mouthRows.splice(i, 1);
+          break;
+        }
+      }
+      try {
+        mouthRowsGroup.remove(row);
+        mouthMapPanel.layout.layout(true);
+      } catch (e) {}
+    };
+    return rowData;
+  }
+
+  // 既定の6行（あ/い/う/え/お/ん(閉)）
+  for (var msIdx = 0; msIdx < MOUTH_SHAPES.length; msIdx++) {
+    addMouthRow(
+      MOUTH_SHAPES[msIdx].label,
+      MOUTH_SHAPES[msIdx].preset,
+      !!MOUTH_SHAPES[msIdx].closedFallback
+    );
+  }
+
+  var mouthAddRow = mouthMapPanel.add("group");
+  mouthAddRow.orientation = "row";
+  mouthAddRow.alignChildren = ["left", "center"];
+  var mouthAddBtn = mouthAddRow.add("button", undefined, "＋口形を追加");
+  mouthAddBtn.preferredSize = [110, BUTTON_HEIGHT];
+  mouthAddBtn.helpTip = "「あいうえおん」以外の口形（特殊口など）の行を追加";
+  mouthAddBtn.onClick = function () {
+    addMouthRow("", "", false);
+    try {
+      mouthMapPanel.layout.layout(true);
+    } catch (e) {}
+  };
 
   var mouthMapBtnRow = mouthMapPanel.add("group");
   mouthMapBtnRow.orientation = "row";
@@ -2533,13 +2611,32 @@
       mouthRows[r].layers = [];
     }
 
+    // 各行のラベルから取り出したキーがレイヤー名に含まれれば割当。
+    // 閉じ口の行を先に評価して優先（「閉」が他より勝つ）。
+    var order = [];
+    for (r = 0; r < mouthRows.length; r++) {
+      if (mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
+    }
+    for (r = 0; r < mouthRows.length; r++) {
+      if (!mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
+    }
+
     for (var i = 0; i < comp.selectedLayers.length; i++) {
       var layer = comp.selectedLayers[i];
-      for (var j = 0; j < MOUTH_AUTO_RULES.length; j++) {
-        if (layer.name.indexOf(MOUTH_AUTO_RULES[j].ch) < 0) continue;
-        mouthRows[MOUTH_AUTO_RULES[j].shapeIndex].layers.push(layer);
-        assignedCount++;
-        break;
+      for (var j = 0; j < order.length; j++) {
+        var keys = mouthMatchKeys(order[j].labelInput.text);
+        var hit = false;
+        for (var ki = 0; ki < keys.length; ki++) {
+          if (keys[ki] && layer.name.indexOf(keys[ki]) >= 0) {
+            hit = true;
+            break;
+          }
+        }
+        if (hit) {
+          order[j].layers.push(layer);
+          assignedCount++;
+          break;
+        }
       }
     }
 
@@ -2552,14 +2649,14 @@
 
     if (assignedCount === 0) {
       alert(
-        "割当できるレイヤーがありませんでした。\nレイヤー名に あ/い/う/え/お/ん/閉 が含まれている必要があります。"
+        "割当できるレイヤーがありませんでした。\n各行のラベル（あ/い/う/閉 など）がレイヤー名に含まれている必要があります。"
       );
     }
   };
 
   mouthPresetBtn.onClick = function () {
     for (var i = 0; i < mouthRows.length; i++) {
-      mouthRows[i].csvInput.text = mouthRows[i].shape.preset;
+      mouthRows[i].csvInput.text = mouthRows[i].preset || "";
     }
   };
 
@@ -2601,7 +2698,7 @@
     for (var i = 0; i < mouthRows.length; i++) {
       var row = mouthRows[i];
       var myCsv = row.tokens.join(",");
-      var isClosedFallback = !!row.shape.closedFallback;
+      var isClosedFallback = !!row.closedCheck.value;
       for (var j = 0; j < row.layers.length; j++) {
         items.push({
           layer: row.layers[j],
@@ -2730,20 +2827,28 @@
   };
 
   // ========== 実行ボタン ==========
+  // 音素配置/一括削除は「音素マーカー (lab)」パネル内に置く（選択→配置の関係を明確に）
+  var labBtnRow = labPanel.add("group");
+  labBtnRow.orientation = "row";
+  labBtnRow.alignment = ["fill", "top"];
+  labBtnRow.alignChildren = ["fill", "center"];
+  labBtnRow.spacing = 10;
+
+  var createBtn = labBtnRow.add("button", undefined, "音素配置");
+  createBtn.alignment = ["fill", "center"];
+  createBtn.enabled = false;
+
+  var deleteMarkersBtn = labBtnRow.add("button", undefined, "一括削除");
+  deleteMarkersBtn.alignment = ["fill", "center"];
+
+  // 口パク設定（名前マッチ方式・レガシー）は別グループに
   var executeGroup = tabLab.add("group");
   executeGroup.orientation = "row";
   executeGroup.alignment = ["fill", "bottom"];
   executeGroup.alignChildren = ["fill", "center"];
   executeGroup.spacing = 10;
 
-  var createBtn = executeGroup.add("button", undefined, "音素配置");
-  createBtn.alignment = ["fill", "center"];
-  createBtn.enabled = false;
-
-  var deleteMarkersBtn = executeGroup.add("button", undefined, "一括削除");
-  deleteMarkersBtn.alignment = ["fill", "center"];
-
-  var setupOpacityBtn = executeGroup.add("button", undefined, "口パク設定");
+  var setupOpacityBtn = executeGroup.add("button", undefined, "口パク設定（名前マッチ）");
   setupOpacityBtn.alignment = ["fill", "center"];
 
   // ========== イベントハンドラ ==========
@@ -3999,9 +4104,12 @@
   var blinkApplyBtn = blinkBtnRow.add("button", undefined, "目パチ設定");
   blinkApplyBtn.helpTip =
     "割当レイヤーに自動まばたきを設定（表情登録済みなら開き目表情中のみまばたき）";
-  var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除");
+  var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除(選択)");
   blinkRemoveBtn.helpTip =
     "選択レイヤーの目パチを解除（表情登録済みなら表情切替に戻す）";
+  var blinkRemoveListBtn = blinkBtnRow.add("button", undefined, "解除(一覧)");
+  blinkRemoveListBtn.helpTip =
+    "プロジェクト内の目パチ設定済みレイヤーを一覧から選んで解除（レイヤー選択不要）";
 
   blinkApplyBtn.onClick = function () {
     var openRow = blinkRows[0];
@@ -4092,10 +4200,41 @@
     alert(message);
   };
 
+  // 1レイヤーの目パチを解除する（表情登録済みなら表情切替へ戻す）。戻り値: restored か
+  function removeBlinkFromLayer(layer) {
+    var emoCtx = parseEmoContext(layer);
+    if (emoCtx) {
+      layer.transform.opacity.expression = buildOpacityExpression(
+        emoCtx.ctrlCompName,
+        emoCtx.targetCompName
+      );
+      return true;
+    }
+    layer.transform.opacity.expression = "";
+    layer.transform.opacity.setValue(100);
+    return false;
+  }
+
+  // プロジェクト内の全コンポから目パチ設定済みレイヤーを集める
+  function findBlinkLayers() {
+    var out = [];
+    var comps = getProjectComps();
+    for (var c = 0; c < comps.length; c++) {
+      var comp = comps[c];
+      for (var i = 1; i <= comp.numLayers; i++) {
+        var ly = comp.layer(i);
+        if (hasOpacitySignature(ly, BLINK_SIGNATURE)) {
+          out.push({ comp: comp, layer: ly });
+        }
+      }
+    }
+    return out;
+  }
+
   blinkRemoveBtn.onClick = function () {
     var comp = getActiveComp();
     if (!comp || comp.selectedLayers.length === 0) {
-      alert("解除するレイヤーを選択してください");
+      alert("解除するレイヤーを選択してください（または「解除(一覧)」を使用）");
       return;
     }
 
@@ -4108,18 +4247,7 @@
       for (var i = 0; i < layers.length; i++) {
         var layer = layers[i];
         if (!hasOpacitySignature(layer, BLINK_SIGNATURE)) continue;
-
-        var emoCtx = parseEmoContext(layer);
-        if (emoCtx) {
-          layer.transform.opacity.expression = buildOpacityExpression(
-            emoCtx.ctrlCompName,
-            emoCtx.targetCompName
-          );
-          restoredCount++;
-        } else {
-          layer.transform.opacity.expression = "";
-          layer.transform.opacity.setValue(100);
-        }
+        if (removeBlinkFromLayer(layer)) restoredCount++;
         removedCount++;
       }
     } finally {
@@ -4131,6 +4259,73 @@
       message += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
     }
     alert(message);
+  };
+
+  // 一覧から目パチを解除（レイヤー選択不要・どこからでも）
+  blinkRemoveListBtn.onClick = function () {
+    var found = findBlinkLayers();
+    if (found.length === 0) {
+      alert("目パチ設定済みのレイヤーが見つかりませんでした。");
+      return;
+    }
+    var dlg = new Window("dialog", "目パチ解除（一覧から選択）");
+    dlg.orientation = "column";
+    dlg.alignChildren = ["fill", "top"];
+    dlg.margins = 12;
+    dlg.spacing = 4;
+    dlg.add("statictext", undefined, "解除する目パチレイヤーを選択:");
+
+    var listGrp = dlg.add("group");
+    listGrp.orientation = "column";
+    listGrp.alignChildren = ["fill", "top"];
+    listGrp.spacing = 1;
+    var checks = [];
+    for (var i = 0; i < found.length; i++) {
+      var cb = listGrp.add(
+        "checkbox",
+        undefined,
+        found[i].comp.name + " / " + found[i].layer.name
+      );
+      cb.value = true;
+      checks.push(cb);
+    }
+
+    var selRow = dlg.add("group");
+    selRow.orientation = "row";
+    var allBtn = selRow.add("button", undefined, "全選択");
+    var noneBtn = selRow.add("button", undefined, "全解除");
+    allBtn.onClick = function () {
+      for (var k = 0; k < checks.length; k++) checks[k].value = true;
+    };
+    noneBtn.onClick = function () {
+      for (var k = 0; k < checks.length; k++) checks[k].value = false;
+    };
+
+    var btnRow = dlg.add("group");
+    btnRow.alignment = ["right", "bottom"];
+    btnRow.add("button", undefined, "解除", { name: "ok" });
+    btnRow.add("button", undefined, "キャンセル", { name: "cancel" });
+    if (dlg.show() !== 1) return;
+
+    var removedCount = 0;
+    var restoredCount = 0;
+    beginUndo("EmoLabMaker: 目パチ解除（一覧）");
+    try {
+      for (var j = 0; j < found.length; j++) {
+        if (!checks[j].value) continue;
+        try {
+          if (removeBlinkFromLayer(found[j].layer)) restoredCount++;
+          removedCount++;
+        } catch (e) {}
+      }
+    } finally {
+      endUndo();
+    }
+    var msg = removedCount + " レイヤーの目パチを解除しました。";
+    if (restoredCount > 0) {
+      msg += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
+    }
+    alert(msg);
   };
 
   // ── 設定（立ち絵タブの表示・挙動。app.settings で永続化） ──
@@ -4569,6 +4764,22 @@
   stageSetSaveBtn.preferredSize = [48, BUTTON_HEIGHT];
   var stageSetDeleteBtn = stageSetPanel.add("button", undefined, "削除");
   stageSetDeleteBtn.preferredSize = [48, BUTTON_HEIGHT];
+
+  // ツリー直上の更新行（再生ヘッド移動後に押す。ScriptUIは再生ヘッド停止を検知できないため）
+  var stageTreeBarRow = tabStage.add("group");
+  stageTreeBarRow.orientation = "row";
+  stageTreeBarRow.alignment = ["fill", "top"];
+  stageTreeBarRow.alignChildren = ["left", "center"];
+  stageTreeBarRow.spacing = 4;
+  var stageTreeHint = stageTreeBarRow.add(
+    "statictext",
+    undefined,
+    "再生ヘッドを動かしたら →"
+  );
+  stageTreeHint.alignment = ["fill", "center"];
+  var stageRefreshBtn2 = stageTreeBarRow.add("button", undefined, "更新");
+  stageRefreshBtn2.preferredSize = [80, BUTTON_HEIGHT];
+  stageRefreshBtn2.helpTip = "現在の再生ヘッド位置の表示状態を取り込んで反映";
 
   var stageGridPanel = tabStage.add("panel");
   stageGridPanel.alignment = ["fill", "fill"];
@@ -5187,6 +5398,11 @@
   stageRefreshBtn.onClick = function () {
     refreshStage(true);
     setStageStatus("一覧を更新しました。");
+  };
+
+  stageRefreshBtn2.onClick = function () {
+    refreshStage(false);
+    setStageStatus("現在の再生ヘッド位置の状態を取り込みました。");
   };
 
   stageHelpBtn.onClick = function () {
