@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.21.1
+ * @version 1.22.0
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -17,6 +17,7 @@
   // 共通定数
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
+  var EMO_VERSION = "1.22.0";
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
   var BLINK_SIGNATURE = "emoBlinkAuto";
 
@@ -258,6 +259,27 @@
 
   var tabs = win.add("tabbedpanel");
   tabs.alignment = ["fill", "fill"];
+
+  // バージョン表示（右下の隅）
+  var versionRow = win.add("group");
+  versionRow.orientation = "row";
+  versionRow.alignment = ["fill", "bottom"];
+  versionRow.alignChildren = ["right", "center"];
+  versionRow.margins = [0, 0, 2, 0];
+  var versionText = versionRow.add(
+    "statictext",
+    undefined,
+    "v" + EMO_VERSION
+  );
+  versionText.alignment = ["right", "center"];
+  versionText.helpTip = "EmoLabMaker version " + EMO_VERSION;
+  try {
+    versionText.graphics.foregroundColor = versionText.graphics.newPen(
+      versionText.graphics.PenType.SOLID_COLOR,
+      [0.5, 0.5, 0.5, 1],
+      1
+    );
+  } catch (eVc) {}
 
   // 表示順は作業フロー基準: 立ち絵(日常のハブ) → 口パク → 目パチ → PSD(初期セットアップ) → 詳細(旧レイヤー選択)
   var tabStage = tabs.add("tab", undefined, "立ち絵");
@@ -2623,14 +2645,66 @@
   var mouthAutoBtn = mouthMapBtnRow.add("button", undefined, "自動割当");
   mouthAutoBtn.helpTip =
     "選択レイヤー名に「あ/い/う/え/お/ん/閉」が含まれていれば自動で割当";
+  var mouthImportBtn = mouthMapBtnRow.add("button", undefined, "現在を取込");
+  mouthImportBtn.helpTip =
+    "アクティブコンポの既存マッピング式（口パク設定済みレイヤー）を読み取って各行に反映";
   var mouthPresetBtn = mouthMapBtnRow.add("button", undefined, "プリセット");
-  mouthPresetBtn.helpTip = "音素リストを PSDToolKit 互換の初期値に戻す";
+  mouthPresetBtn.helpTip = "口形マッピングを初期状態（あ/い/う/え/お/ん）に戻す";
   var mouthApplyBtn = mouthMapBtnRow.add("button", undefined, "適用");
   mouthApplyBtn.helpTip =
     "割当済みレイヤーに不透明度エクスプレッションを設定（表情登録済みなら共存）";
   var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
   mouthRemoveBtn.helpTip =
     "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
+
+  // 候補が複数ある口形レイヤーをどの行に割り当てるかを選ばせるダイアログ(#G)。
+  // 戻り値: 選んだ rowData / スキップなら null。
+  function pickMouthRowDialog(layerName, candidateRows) {
+    var dlg = new Window("dialog", "口形の割当先を選択");
+    dlg.orientation = "column";
+    dlg.alignChildren = ["fill", "top"];
+    dlg.spacing = 8;
+    dlg.margins = 14;
+
+    var msg = dlg.add(
+      "statictext",
+      undefined,
+      "「" + layerName + "」は複数の口形に一致します。割当先を選んでください。",
+      { multiline: true }
+    );
+    msg.preferredSize = [320, 36];
+
+    var listGroup = dlg.add("group");
+    listGroup.orientation = "column";
+    listGroup.alignChildren = ["fill", "top"];
+    var dd = listGroup.add("dropdownlist");
+    dd.alignment = ["fill", "top"];
+    for (var i = 0; i < candidateRows.length; i++) {
+      var lbl = candidateRows[i].labelInput.text || "（無名）";
+      var csv = candidateRows[i].csvInput.text || "";
+      dd.add("item", lbl + (csv ? "  [" + csv + "]" : ""));
+    }
+    dd.selection = 0;
+
+    var btnRow = dlg.add("group");
+    btnRow.orientation = "row";
+    btnRow.alignment = ["right", "top"];
+    var skipBtn = btnRow.add("button", undefined, "スキップ");
+    var okBtn = btnRow.add("button", undefined, "割当", { name: "ok" });
+
+    var result = { chosen: null };
+    okBtn.onClick = function () {
+      result.chosen =
+        dd.selection !== null ? candidateRows[dd.selection.index] : null;
+      dlg.close();
+    };
+    skipBtn.onClick = function () {
+      result.chosen = null;
+      dlg.close();
+    };
+    dlg.show();
+    return result.chosen;
+  }
 
   mouthAutoBtn.onClick = function () {
     var comp = getActiveComp();
@@ -2644,8 +2718,8 @@
       mouthRows[r].layers = [];
     }
 
-    // 各行のラベルから取り出したキーがレイヤー名に含まれれば割当。
-    // 閉じ口の行を先に評価して優先（「閉」が他より勝つ）。
+    // 各行のラベルから取り出したキーがレイヤー名に含まれれば候補。
+    // 閉じ口の行を先に並べて優先順位の基準にする（「閉」が他より勝つ）。
     var order = [];
     for (r = 0; r < mouthRows.length; r++) {
       if (mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
@@ -2656,6 +2730,8 @@
 
     for (var i = 0; i < comp.selectedLayers.length; i++) {
       var layer = comp.selectedLayers[i];
+      // この層に一致する行をすべて集める
+      var candidates = [];
       for (var j = 0; j < order.length; j++) {
         var keys = mouthMatchKeys(order[j].labelInput.text);
         var hit = false;
@@ -2665,12 +2741,19 @@
             break;
           }
         }
-        if (hit) {
-          order[j].layers.push(layer);
-          assignedCount++;
-          break;
-        }
+        if (hit) candidates.push(order[j]);
       }
+      if (candidates.length === 0) continue;
+      var target;
+      if (candidates.length === 1) {
+        target = candidates[0];
+      } else {
+        // 候補が複数 → 選択させる(#G)。スキップ可
+        target = pickMouthRowDialog(layer.name, candidates);
+        if (!target) continue;
+      }
+      target.layers.push(layer);
+      assignedCount++;
     }
 
     for (var k = 0; k < mouthRows.length; k++) {
@@ -2687,10 +2770,122 @@
     }
   };
 
-  mouthPresetBtn.onClick = function () {
-    for (var i = 0; i < mouthRows.length; i++) {
-      mouthRows[i].csvInput.text = mouthRows[i].preset || "";
+  // すべての口形行を削除して既定の6行（あ/い/う/え/お/ん）に戻す
+  function resetMouthRowsToDefault() {
+    for (var i = mouthRows.length - 1; i >= 0; i--) {
+      try {
+        mouthRowsGroup.remove(mouthRows[i].row);
+      } catch (e) {}
     }
+    mouthRows = [];
+    for (var s = 0; s < MOUTH_SHAPES.length; s++) {
+      addMouthRow(
+        MOUTH_SHAPES[s].label,
+        MOUTH_SHAPES[s].preset,
+        !!MOUTH_SHAPES[s].closedFallback
+      );
+    }
+    try {
+      mouthMapPanel.layout.layout(true);
+    } catch (e2) {}
+  }
+
+  mouthPresetBtn.onClick = function () {
+    // 既定の行/音素リストに戻す（追加した行・割当もリセットされる）
+    if (
+      !confirm(
+        "口形マッピングを PSDToolKit 互換の初期状態（あ/い/う/え/お/ん の6行）に戻します。\n追加した口形の行や割当もリセットされます。よろしいですか？"
+      )
+    ) {
+      return;
+    }
+    resetMouthRowsToDefault();
+  };
+
+  // 既存マッピング式から myPhonemes / isClosedFallback を取り出す（#K 取込用）
+  function parseLabMapExpression(expr) {
+    if (!expr || expr.indexOf(LAB_MAP_SIGNATURE) < 0) return null;
+    var csv = "";
+    var m2 = expr.match(/var\s+myPhonemes\s*=\s*",([^"]*),"/);
+    if (m2) {
+      csv = m2[1];
+    }
+    var closed = /var\s+isClosedFallback\s*=\s*true/.test(expr);
+    return { myCsv: csv, isClosedFallback: closed };
+  }
+
+  // 現在のコンポの口パク設定済みレイヤーを読み取り、各行に取り込む(#K)
+  mouthImportBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp) {
+      alert("口パク設定済みのレイヤーがあるコンポをアクティブにしてください。");
+      return;
+    }
+    // (csv|closed) ごとにレイヤーをまとめる
+    var groups = [];
+    var index = {};
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var layer = comp.layer(i);
+      var expr = "";
+      try {
+        expr = layer.transform.opacity.expression || "";
+      } catch (e) {
+        continue;
+      }
+      var parsed = parseLabMapExpression(expr);
+      if (!parsed) continue;
+      var keyTokens = normalizeCsvTokens(parsed.myCsv).join(",");
+      var key = (parsed.isClosedFallback ? "C|" : "O|") + keyTokens;
+      if (index[key] === undefined) {
+        index[key] = groups.length;
+        groups.push({
+          myCsv: keyTokens,
+          isClosedFallback: parsed.isClosedFallback,
+          layers: [],
+        });
+      }
+      groups[index[key]].layers.push(layer);
+    }
+
+    if (groups.length === 0) {
+      alert(
+        "このコンポに口パク設定済み（口形マッピング式）のレイヤーが見つかりませんでした。"
+      );
+      return;
+    }
+
+    // 取り込み: まず既定行へ、CSV/閉じが一致する行があればそこへ。
+    // 一致が無ければ新規行を追加する。既存の割当は上書きする。
+    resetMouthRowsToDefault();
+    for (var g = 0; g < groups.length; g++) {
+      var grp = groups[g];
+      var grpTokens = normalizeCsvTokens(grp.myCsv).join(",");
+      var matched = null;
+      for (var r = 0; r < mouthRows.length; r++) {
+        var rowTokens = normalizeCsvTokens(mouthRows[r].csvInput.text).join(",");
+        if (
+          rowTokens === grpTokens &&
+          !!mouthRows[r].closedCheck.value === grp.isClosedFallback
+        ) {
+          matched = mouthRows[r];
+          break;
+        }
+      }
+      if (!matched) {
+        // ラベルは推測しづらいので CSV 先頭 or "口形N" を仮ラベルに
+        var guessLabel = grpTokens ? grpTokens.split(",")[0] : "口形";
+        matched = addMouthRow(guessLabel, grp.myCsv, grp.isClosedFallback);
+      }
+      matched.layers = grp.layers.slice(0);
+      matched.namesText.text = describeAssignedLayers(matched.layers);
+      matched.namesText.helpTip = matched.namesText.text;
+    }
+    try {
+      mouthMapPanel.layout.layout(true);
+    } catch (eL) {}
+    setStatus(
+      "現在のマッピングを取り込みました（" + groups.length + " 口形）。"
+    );
   };
 
   mouthApplyBtn.onClick = function () {
@@ -4558,6 +4753,61 @@
     return name;
   }
 
+  // 名前群から「最も多くの名前が共有する <...>_ prefix」を求める。
+  // detectCommonPrefix は全名前の共通部分なので、prefix を持たない名前が
+  // 1 つでもあると "" になってしまう（#N 冗長名の原因）。こちらは多数決で、
+  // prefix なしの外れ値（"くろいやつ" 等）があっても支配的 prefix を拾う。
+  function detectDominantPrefix(names) {
+    if (!names || names.length === 0) return "";
+    var counts = {};
+    var i, k;
+    for (i = 0; i < names.length; i++) {
+      var n = names[i];
+      // この名前が含む「_ まで」の各 prefix 候補を加点
+      for (k = 0; k < n.length; k++) {
+        if (n.charAt(k) === "_") {
+          var cand = n.substring(0, k + 1);
+          counts[cand] = (counts[cand] || 0) + 1;
+        }
+      }
+    }
+    var best = "";
+    var bestScore = 0;
+    for (var key in counts) {
+      if (!counts.hasOwnProperty(key)) continue;
+      if (counts[key] < 2) continue; // 単独 prefix は採用しない
+      // 共有数が多いほど良い。同数なら長い prefix を優先（より深く剥がす）
+      if (
+        counts[key] > bestScore ||
+        (counts[key] === bestScore && key.length > best.length)
+      ) {
+        best = key;
+        bestScore = counts[key];
+      }
+    }
+    return best;
+  }
+
+  // 候補 prefix のうち name が始まるものを長い順に剥がし、* / ! / :flip を除いた
+  // 表示用 base 名を返す。複数キャラ混在や prefix なしコンポにも頑健。
+  function stageDisplayName(name, prefixCandidates) {
+    var stripped = name;
+    var bestLen = 0;
+    for (var i = 0; i < prefixCandidates.length; i++) {
+      var p = prefixCandidates[i];
+      if (
+        p &&
+        p.length > bestLen &&
+        name.length > p.length &&
+        name.indexOf(p) === 0
+      ) {
+        stripped = name.substring(p.length);
+        bestLen = p.length;
+      }
+    }
+    return parsePsdLayerName(stripped).base;
+  }
+
   // ── 階層ツリー構築 ──────────────────────────────────────────────
   // 各 comp を DFS で走査し、深さ付きノード列を返す。
   //   choice 分類(リーフ): * = ラジオ / 無印 = 任意指定 / ! = 出さない(常時表示で操作不要)
@@ -4912,6 +5162,37 @@
     } catch (e) {}
   };
 
+  // マウスホイールでのスクロール(#L)。AE の ScriptUI はホイールイベントの対応が
+  // バージョン依存のため、try で防御しつつ複数のデルタ表現に対応する。
+  // 対応していない環境ではスクロールバー操作にフォールバックする。
+  function scrollStageBy(delta) {
+    if (!stageScroll.visible) return;
+    var v = stageScrollValue + delta;
+    if (v < 0) v = 0;
+    if (v > stageScroll.maxvalue) v = stageScroll.maxvalue;
+    applyStageScroll(v);
+  }
+  function attachStageWheel(ctrl) {
+    try {
+      ctrl.addEventListener("mousewheel", function (ev) {
+        var d = 0;
+        try {
+          if (ev.deltaY !== undefined && ev.deltaY !== null) d = ev.deltaY;
+          else if (ev.wheelDelta !== undefined && ev.wheelDelta !== null)
+            d = -ev.wheelDelta; // wheelDelta は上スクロールで正
+          else if (ev.detail !== undefined && ev.detail !== null) d = ev.detail;
+        } catch (eD) {}
+        if (d === 0) return;
+        scrollStageBy(d > 0 ? 36 : -36);
+        try {
+          ev.preventDefault();
+        } catch (eP) {}
+      });
+    } catch (e) {}
+  }
+  attachStageWheel(stageGridPanel);
+  attachStageWheel(stageGrid);
+
   function setStageStatus(text) {
     stageStatusText.text = text;
   }
@@ -4986,7 +5267,14 @@
         }
 
         var isCollapsed = !!stageCollapsed[node.comp.id];
-        if (node.hasChildren) {
+        // 折りたたみ対象: 子コンポを持つ階層だけでなく、自身が選択肢を持つ階層
+        // （目/口/服 のような末端グループ）も「コンポジションごとに」たためる(#J)
+        var nodeHasChoices =
+          node.radioChoices.length > 0 ||
+          node.optionalChoices.length > 0 ||
+          (cfgShowForced && node.forcedChoices.length > 0);
+        var collapsible = node.hasChildren || nodeHasChoices;
+        if (collapsible) {
           // AE標準のツイスト三角（▼=展開 / ▶=折りたたみ）。枠なしのクリック可能ラベル
           var tg = head.add("statictext", undefined, isCollapsed ? "▶" : "▼");
           tg.preferredSize = [14, BUTTON_HEIGHT];
@@ -5019,7 +5307,7 @@
 
         // 折りたたみ時は子ノードだけでなく、このノード直下の選択肢も隠す
         // （ヘッダ＋トグルのみ残す）
-        if (node.hasChildren && isCollapsed) continue;
+        if (isCollapsed) continue;
 
         // 選択肢を radio→optional の順でフラット化し、幅で折り返す
         var items = [];
@@ -5217,9 +5505,9 @@
 
     var names = [];
     for (i = 0; i < stageNodes.length; i++) names.push(stageNodes[i].comp.name);
-    // 表示名の短縮prefix。ルート選択に依存せず短縮できるよう、ルート以外の
-    // ノード名の共通prefixを優先（例: 子が全て "T_Mhime_*" なら "T_Mhime_" を剥がす）。
-    // 求まらなければ rootComp 名、それも無ければ全体の共通prefixにフォールバック。
+    // 表示名の短縮prefix。ルート選択に依存せず短縮できるよう複数候補を用意し、
+    // 各ノードごとに「始まる最長の prefix」を剥がす（prefix を持たないコンポや
+    // 複数キャラ混在でも、支配的 prefix を多数決で拾う＝#N 冗長名対策）。
     var rootName = rootComp ? rootComp.name : null;
     var childNames = [];
     for (i = 0; i < stageNodes.length; i++) {
@@ -5227,14 +5515,17 @@
         childNames.push(stageNodes[i].comp.name);
       }
     }
-    var prefix = detectCommonPrefix(childNames);
-    if (!prefix && rootName) prefix = rootName + "_";
-    if (!prefix) prefix = detectCommonPrefix(names);
+    var prefixCandidates = [];
+    if (rootName) prefixCandidates.push(rootName + "_");
+    var dom = detectDominantPrefix(names);
+    if (dom) prefixCandidates.push(dom);
+    var domChild = detectDominantPrefix(childNames);
+    if (domChild) prefixCandidates.push(domChild);
+    var common = detectCommonPrefix(childNames);
+    if (common) prefixCandidates.push(common);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
-      nd.displayName = parsePsdLayerName(
-        shortenGroupName(nd.comp.name, prefix)
-      ).base;
+      nd.displayName = stageDisplayName(nd.comp.name, prefixCandidates);
       nd.ctrlComp =
         (nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null) ||
         stageCtrlComp;
