@@ -5671,11 +5671,13 @@
   //   * フォルダ   → ラジオ（親の排他グループの一員。クリックで親に書き込み）
   //   無印フォルダ → チェックボックス（丸ごと表示/非表示。クリックで親に書き込み）
   // 親側ではこのフォルダを選択肢として重複表示しない（emittedRefNames で除外済み）。
-  function renderStageHeader(head, node) {
+  function renderStageHeader(head, node, soleWrappedRef) {
     var lblText = node.displayName;
     var parent = node.parent;
     var kind = null;
-    if (!node.isRoot && node.refName && parent) {
+    // 実質ルート（立ち絵を包むだけの外側コンポの唯一の子）はチェックを出さない
+    var isWrapperRoot = soleWrappedRef && node.refName === soleWrappedRef;
+    if (!node.isRoot && !isWrapperRoot && node.refName && parent) {
       if (node.refForced) {
         kind = cfgShowForced ? "headerForced" : null;
       } else if (node.refExclusive) {
@@ -5776,6 +5778,29 @@
         }
       }
 
+      // 外側コンポをルートに選び、それが「立ち絵フォルダ1つを包むだけ」のとき、
+      // 包まれた立ち絵ノードはツリーの実質ルート。全体トグルは不要なので
+      // チェックボックスを出さずプレーンなヘッダにする（ルートにチェック不要）。
+      var soleWrappedRef = null;
+      for (var rn = 0; rn < stageNodes.length; rn++) {
+        if (!stageNodes[rn].isRoot) continue;
+        var rnode = stageNodes[rn];
+        var total =
+          rnode.radioChoices.length +
+          rnode.optionalChoices.length +
+          rnode.forcedChoices.length;
+        if (total === 1) {
+          var only =
+            rnode.radioChoices[0] ||
+            rnode.optionalChoices[0] ||
+            rnode.forcedChoices[0];
+          if (only && emittedRefNames[only.fullName]) {
+            soleWrappedRef = only.fullName;
+          }
+        }
+        break;
+      }
+
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
         // 祖先のいずれかが折りたたまれていれば隠す
@@ -5851,7 +5876,7 @@
 
         // 非ルートのフォルダ参照は、ヘッダ自体を ☑(無印)/◉(*)/グレー☑(!) にして
         // ラベルと一体化する（▼☑その他）。親側の重複選択肢は出していない。
-        renderStageHeader(head, node);
+        renderStageHeader(head, node, soleWrappedRef);
 
         // すべてラジオなのに何も選択されていない階層は警告を出す
         var warn = head.add("statictext", undefined, "⚠ 未選択");
