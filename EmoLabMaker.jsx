@@ -5999,25 +5999,10 @@
         }
       }
 
-      // 中身(stageGrid)を整形してから配置する。panel.layout.layout(true) は
-      // 中身の配置に必要だが、パネル自身をコンテンツ高さに伸縮させてしまい、
-      // ウィンドウの高さ変更時にスクロールバーが壊れる。そこでウィンドウから
-      // 与えられたパネルサイズを退避し、レイアウト後に復元する。
-      var savedPanelW = null;
-      var savedPanelH = null;
-      try {
-        if (stageGridPanel.size) {
-          savedPanelW = stageGridPanel.size.width;
-          savedPanelH = stageGridPanel.size.height;
-        }
-      } catch (eSz) {}
+      // 作り直し時は中身とパネルをレイアウトしてから配置する。
+      // （リサイズ時はここを通らず、軽量に applyStageScroll で再フィットする）
       stageGrid.layout.layout(true);
       stageGridPanel.layout.layout(true);
-      try {
-        if (savedPanelW !== null) {
-          stageGridPanel.size = [savedPanelW, savedPanelH];
-        }
-      } catch (eSz2) {}
       applyStageScroll(stageScrollValue);
     } finally {
       isRebuildingStage = false;
@@ -6398,9 +6383,21 @@
   // リサイズ対応
   win.onResizing = win.onResize = function () {
     this.layout.resize();
-    if (tabs.selection === tabSelector) resizeGrid();
-    else if (tabs.selection === tabStage) rebuildStageTree();
-    else if (tabs.selection === tabLab) refreshMouthScroll();
+    if (tabs.selection === tabSelector) {
+      resizeGrid();
+    } else if (tabs.selection === tabStage) {
+      // リサイズ時は作り直さず、中身を測り直してスクロールを再フィットするだけ。
+      // パネル自体を layout(true) すると中身高さへ伸縮してスクロールバーが壊れる。
+      try {
+        stageGrid.layout.layout(true);
+      } catch (eS) {}
+      applyStageScroll(stageScrollValue);
+    } else if (tabs.selection === tabLab) {
+      try {
+        mouthRowsGroup.layout.layout(true);
+      } catch (eM) {}
+      applyMouthScroll(mouthRowsScrollValue);
+    }
   };
 
   // タブ切替時に最新化（立ち絵=階層再取得 / PSD=コンポ一覧を更新）
