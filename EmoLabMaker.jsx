@@ -4143,6 +4143,74 @@
   psdSetupBtn.helpTip =
     "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示 / :flipx = 反転ペア) を解釈して表情切替を自動セットアップ。再実行で更新";
 
+  // ── レイヤー名 prefix ショートカット（セットアップ前の下準備）(#F) ──
+  var psdPrefixPanel = tabPsd.add("panel", undefined, "命名ショートカット");
+  psdPrefixPanel.orientation = "column";
+  psdPrefixPanel.alignChildren = ["fill", "top"];
+  psdPrefixPanel.alignment = ["fill", "top"];
+  psdPrefixPanel.margins = 10;
+  psdPrefixPanel.spacing = 4;
+  var psdPrefixHint = psdPrefixPanel.add(
+    "statictext",
+    undefined,
+    "アクティブコンポで選択中のレイヤー名に * / ! を付与します（付与後は再セットアップ）"
+  );
+  psdPrefixHint.alignment = ["fill", "top"];
+  var psdPrefixRow = psdPrefixPanel.add("group");
+  psdPrefixRow.orientation = "row";
+  psdPrefixRow.alignChildren = ["left", "center"];
+  psdPrefixRow.spacing = 5;
+  var psdAddStarBtn = psdPrefixRow.add("button", undefined, "* 排他(ラジオ)");
+  psdAddStarBtn.helpTip =
+    "選択レイヤーに * を付与（兄弟内で排他＝ラジオ選択）。既存の * / ! は置換";
+  var psdAddBangBtn = psdPrefixRow.add("button", undefined, "! 強制表示");
+  psdAddBangBtn.helpTip =
+    "選択レイヤーに ! を付与（常に表示）。既存の * / ! は置換";
+  var psdStripBtn = psdPrefixRow.add("button", undefined, "prefix除去");
+  psdStripBtn.helpTip = "選択レイヤーの先頭の * / ! を除去（無印＝任意指定に）";
+
+  // 選択レイヤーの先頭 prefix を mode("*"/"!"/"") に付け替える
+  function applyPsdPrefix(mode) {
+    var comp = getActiveComp();
+    if (!comp || comp.selectedLayers.length === 0) {
+      alert("名前を変更するレイヤーを選択してください。");
+      return;
+    }
+    var count = 0;
+    beginUndo("emo2layer: レイヤー名 prefix 付与");
+    try {
+      for (var i = 0; i < comp.selectedLayers.length; i++) {
+        var L = comp.selectedLayers[i];
+        var nm = L.name;
+        // 先頭の * / ! をすべて剥がす（:flip サフィックスは保持）
+        while (nm.length > 0 && (nm.charAt(0) === "*" || nm.charAt(0) === "!")) {
+          nm = nm.substring(1);
+        }
+        var newName = mode === "*" ? "*" + nm : mode === "!" ? "!" + nm : nm;
+        if (newName !== L.name) {
+          try {
+            L.name = newName;
+            count++;
+          } catch (eN) {}
+        }
+      }
+    } finally {
+      endUndo();
+    }
+    psdStatusText.text =
+      count +
+      " レイヤーの名前を変更しました。表情切替へ反映するには「解析してセットアップ / 更新」を実行してください。";
+  }
+  psdAddStarBtn.onClick = function () {
+    applyPsdPrefix("*");
+  };
+  psdAddBangBtn.onClick = function () {
+    applyPsdPrefix("!");
+  };
+  psdStripBtn.onClick = function () {
+    applyPsdPrefix("");
+  };
+
   // ══════════════════════════════════════════════════════════════════
   // 目パチ (自動まばたき)
   // ══════════════════════════════════════════════════════════════════
@@ -4332,12 +4400,12 @@
   var blinkApplyBtn = blinkBtnRow.add("button", undefined, "目パチ設定");
   blinkApplyBtn.helpTip =
     "割当レイヤーに自動まばたきを設定（表情登録済みなら開き目表情中のみまばたき）";
-  var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除(選択)");
+  var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除(コンポ)");
   blinkRemoveBtn.helpTip =
-    "選択レイヤーの目パチを解除（表情登録済みなら表情切替に戻す）";
+    "アクティブコンポ内の目パチを一括解除（開き/中間/閉じをまとめて。表情登録済みなら表情切替に戻す）";
   var blinkRemoveListBtn = blinkBtnRow.add("button", undefined, "解除(一覧)");
   blinkRemoveListBtn.helpTip =
-    "プロジェクト内の目パチ設定済みレイヤーを一覧から選んで解除（レイヤー選択不要）";
+    "プロジェクト内の目パチ設定済みコンポを一覧から選んで一括解除（レイヤー選択不要）";
 
   blinkApplyBtn.onClick = function () {
     var openRow = blinkRows[0];
@@ -4459,62 +4527,115 @@
     return out;
   }
 
-  blinkRemoveBtn.onClick = function () {
-    var comp = getActiveComp();
-    if (!comp || comp.selectedLayers.length === 0) {
-      alert("解除するレイヤーを選択してください（または「解除(一覧)」を使用）");
-      return;
+  function hasBlinkLayer(comp) {
+    for (var i = 1; i <= comp.numLayers; i++) {
+      if (hasOpacitySignature(comp.layer(i), BLINK_SIGNATURE)) return true;
     }
+    return false;
+  }
 
+  // 目パチ設定済みレイヤーをコンポ（=コンポグループ）単位でまとめる
+  function findBlinkComps() {
+    var found = findBlinkLayers();
+    var groups = [];
+    var index = {};
+    for (var i = 0; i < found.length; i++) {
+      var id = found[i].comp.id;
+      if (index[id] === undefined) {
+        index[id] = groups.length;
+        groups.push({ comp: found[i].comp, layers: [] });
+      }
+      groups[index[id]].layers.push(found[i].layer);
+    }
+    return groups;
+  }
+
+  // 指定コンポ内の全目パチレイヤーを解除する（開き/中間/閉じをまとめて）
+  function removeBlinkFromComp(comp) {
     var removedCount = 0;
     var restoredCount = 0;
-
-    beginUndo("EmoLabMaker: 目パチ解除");
-    try {
-      var layers = comp.selectedLayers;
-      for (var i = 0; i < layers.length; i++) {
-        var layer = layers[i];
-        if (!hasOpacitySignature(layer, BLINK_SIGNATURE)) continue;
-        if (removeBlinkFromLayer(layer)) restoredCount++;
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var ly = comp.layer(i);
+      if (!hasOpacitySignature(ly, BLINK_SIGNATURE)) continue;
+      try {
+        if (removeBlinkFromLayer(ly)) restoredCount++;
         removedCount++;
-      }
+      } catch (e) {}
+    }
+    return { removed: removedCount, restored: restoredCount };
+  }
+
+  blinkRemoveBtn.onClick = function () {
+    var comp = getActiveComp();
+    if (!comp) {
+      alert(
+        "目パチを解除するコンポをアクティブにしてください（または「解除(一覧)」を使用）"
+      );
+      return;
+    }
+    // コンポグループ単位で解除: 選択レイヤーだけでなく、アクティブコンポ内の
+    // 目パチレイヤーをすべて解除する（開きだけ解除されて中間/閉じが残る不整合を防ぐ）(#E)
+    if (!hasBlinkLayer(comp)) {
+      alert("このコンポには目パチ設定済みのレイヤーがありません。");
+      return;
+    }
+    var res;
+    beginUndo("EmoLabMaker: 目パチ解除（コンポ）");
+    try {
+      res = removeBlinkFromComp(comp);
     } finally {
       endUndo();
     }
 
-    var message = removedCount + " レイヤーの目パチを解除しました。";
-    if (restoredCount > 0) {
-      message += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
+    var message =
+      "「" +
+      comp.name +
+      "」の目パチを解除しました（" +
+      res.removed +
+      " レイヤー）。";
+    if (res.restored > 0) {
+      message += "\nうち " + res.restored + " レイヤーは表情切替に戻しました。";
     }
     alert(message);
   };
 
-  // 一覧から目パチを解除（レイヤー選択不要・どこからでも）
+  // 一覧から目パチを解除（コンポグループ単位・どこからでも）(#E)
   blinkRemoveListBtn.onClick = function () {
-    var found = findBlinkLayers();
-    if (found.length === 0) {
+    var groups = findBlinkComps();
+    if (groups.length === 0) {
       alert("目パチ設定済みのレイヤーが見つかりませんでした。");
       return;
     }
-    var dlg = new Window("dialog", "目パチ解除（一覧から選択）");
+    var dlg = new Window("dialog", "目パチ解除（コンポ単位で選択）");
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
     dlg.margins = 12;
     dlg.spacing = 4;
-    dlg.add("statictext", undefined, "解除する目パチレイヤーを選択:");
+    dlg.add(
+      "statictext",
+      undefined,
+      "解除するコンポを選択（そのコンポ内の目パチを一括解除）:"
+    );
 
     var listGrp = dlg.add("group");
     listGrp.orientation = "column";
     listGrp.alignChildren = ["fill", "top"];
     listGrp.spacing = 1;
     var checks = [];
-    for (var i = 0; i < found.length; i++) {
+    for (var i = 0; i < groups.length; i++) {
       var cb = listGrp.add(
         "checkbox",
         undefined,
-        found[i].comp.name + " / " + found[i].layer.name
+        groups[i].comp.name + "（" + groups[i].layers.length + " レイヤー）"
       );
       cb.value = true;
+      var tipNames = [];
+      for (var t = 0; t < groups[i].layers.length; t++) {
+        try {
+          tipNames.push(groups[i].layers[t].name);
+        } catch (eT) {}
+      }
+      cb.helpTip = tipNames.join(", ");
       checks.push(cb);
     }
 
@@ -4537,19 +4658,24 @@
 
     var removedCount = 0;
     var restoredCount = 0;
-    beginUndo("EmoLabMaker: 目パチ解除（一覧）");
+    var compCount = 0;
+    beginUndo("EmoLabMaker: 目パチ解除（コンポ単位）");
     try {
-      for (var j = 0; j < found.length; j++) {
+      for (var j = 0; j < groups.length; j++) {
         if (!checks[j].value) continue;
-        try {
-          if (removeBlinkFromLayer(found[j].layer)) restoredCount++;
-          removedCount++;
-        } catch (e) {}
+        var res = removeBlinkFromComp(groups[j].comp);
+        removedCount += res.removed;
+        restoredCount += res.restored;
+        compCount++;
       }
     } finally {
       endUndo();
     }
-    var msg = removedCount + " レイヤーの目パチを解除しました。";
+    var msg =
+      compCount +
+      " コンポ・計 " +
+      removedCount +
+      " レイヤーの目パチを解除しました。";
     if (restoredCount > 0) {
       msg += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
     }
