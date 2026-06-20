@@ -418,10 +418,16 @@
     try {
       layer.outPoint = ctrlComp.duration;
     } catch (e) {}
-    // 制御ヌルは最下部へ。addNull は最上位(index 1)に積むため、複数作ると
-    // 立ち絵の上に逆順で重なってしまう。最下部に集めると作成順かつ邪魔にならない。
+    // 制御ヌルは最上位に置いてよいが、addNull は新規を index 1 に積むため
+    // 複数作ると「逆順」に並ぶ。既存の制御ヌルの直後へ移動して作成順を保つ。
     try {
-      layer.moveToEnd();
+      var lastCtrl = null;
+      for (var li = 1; li <= ctrlComp.numLayers; li++) {
+        var other = ctrlComp.layer(li);
+        if (other === layer) continue;
+        if (other.name.indexOf(CTRL_PREFIX) === 0) lastCtrl = other;
+      }
+      if (lastCtrl) layer.moveAfter(lastCtrl);
     } catch (eMove) {}
     hideCtrlLayer(layer, name);
     return layer;
