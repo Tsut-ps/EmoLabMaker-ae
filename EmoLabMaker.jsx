@@ -3651,6 +3651,21 @@
     };
   }
 
+  // コンポ直下に * (排他) レイヤーが 1 つでもあるか。
+  // * フォルダの中身がさらに排他選択を持つ「本物の階層」か、1ポーズを包むだけの
+  // 「ラッパー」かを区別するのに使う（stripPrefix はルート名prefix "<root>_"）。
+  function compHasExclusiveLayer(comp, stripPrefix) {
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var nm = comp.layer(i).name;
+      if (stripPrefix && nm.indexOf(stripPrefix) === 0) {
+        nm = nm.substring(stripPrefix.length);
+      }
+      var p = parsePsdLayerName(nm);
+      if (p.exclusive && !p.flipx && !p.flipy) return true;
+    }
+    return false;
+  }
+
   // parsed の反転情報を suffix 文字列に戻す（"" / "flipx" / "flipy" / "flipxy"）
   function flipSuffixOf(parsed) {
     if (parsed.flipx && parsed.flipy) return "flipxy";
@@ -3773,13 +3788,15 @@
         } catch (e) {}
         var isFolder = !!(source && source instanceof CompItem);
 
+        var exEntry = null;
         if (parsed.flipx || parsed.flipy) {
           // 反転バリエーション（:flipx/:flipy）は「通常レイヤーとのペア」。
           // base が同コンポ・同種別にあれば登録対象（autoSetupPsd でペア判定）。
           // base が無い孤立 flip（線画 :flipx 等）は登録せずレポートのみ。
           info.flipVariants.push({ layer: layer, parsed: parsed });
         } else if (parsed.exclusive) {
-          info.exclusiveLayers.push({ layer: layer, parsed: parsed });
+          exEntry = { layer: layer, parsed: parsed };
+          info.exclusiveLayers.push(exEntry);
           if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
         } else if (parsed.forced) {
           info.forcedLayers.push(layer);
@@ -3789,7 +3806,19 @@
           info.optionalLayers.push({ layer: layer, parsed: parsed });
         }
 
-        if (isFolder) scanComp(source);
+        if (isFolder) {
+          // * フォルダで中身に * が無い = 1ポーズを包むだけのラッパー。
+          // フォルダ自体を親のラジオ選択肢に集約し、中身は「絵」として常時表示。
+          // → 内部をグループ化（登録）せず、autoSetupPsd で中身を表示状態にする。
+          if (
+            parsed.exclusive &&
+            !compHasExclusiveLayer(source, scanRootPrefix)
+          ) {
+            if (exEntry) exEntry.poseWrapperSource = source;
+          } else {
+            scanComp(source);
+          }
+        }
       }
 
       if (
@@ -4070,6 +4099,20 @@
           layersToRegister,
           "EmoLabMaker: PSDセットアップ登録"
         );
+
+        // ポーズラッパー（* フォルダで中身が「絵」だけ）の内部は登録しないが、
+        // フォルダ選択時に必ず見えるよう、内部の最上位レイヤーを表示状態にする。
+        for (var pw = 0; pw < group.exclusiveLayers.length; pw++) {
+          var pwSrc = group.exclusiveLayers[pw].poseWrapperSource;
+          if (!pwSrc) continue;
+          for (var pl = 1; pl <= pwSrc.numLayers; pl++) {
+            var pwLayer = pwSrc.layer(pl);
+            if (isSystemLayerName(pwLayer.name)) continue;
+            try {
+              pwLayer.enabled = true;
+            } catch (ePw) {}
+          }
+        }
 
         // 既定の表示中集合マーカー（初回・マーカー皆無時のみ）
         // = 既定ラジオ（表示状態の排他）＋ 表示状態の任意指定（完全名）
@@ -5180,13 +5223,19 @@
         }
 
         if (isFolder) {
-          children = children.concat(
-            walk(src, childDepth, false, {
-              name: layer.name,
-              exclusive: parsed.exclusive,
-              forced: parsed.forced,
-            })
-          );
+          // * フォルダで中身に * が無い = 1ポーズを包むラッパー。フォルダ自体を
+          // 親のラジオ選択肢に集約済みなので、冗長なサブノードは出さない。
+          var isPoseWrapper =
+            parsed.exclusive && !compHasExclusiveLayer(src, stageRootPrefix);
+          if (!isPoseWrapper) {
+            children = children.concat(
+              walk(src, childDepth, false, {
+                name: layer.name,
+                exclusive: parsed.exclusive,
+                forced: parsed.forced,
+              })
+            );
+          }
         }
       }
 
