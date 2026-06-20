@@ -2841,10 +2841,11 @@
   mouthRemoveBtn.helpTip =
     "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
 
-  // 候補が複数ある口形レイヤーをどの行に割り当てるかを選ばせるダイアログ(#G)。
-  // 戻り値: 選んだ rowData / スキップなら null。
-  function pickMouthRowDialog(layerName, candidateRows) {
-    var dlg = new Window("dialog", "口形の割当先を選択");
+  // 1つの口形（行）に複数の口パクレイヤーが一致したとき、使う 1 枚を選ばせる。
+  // （「<口パク1>,<口パク2>」のように 2 枚割り当てると口が二重表示になるため）
+  // 戻り値: 選んだ layer / スキップ(割り当てない)なら null。
+  function pickMouthLayerDialog(rowLabel, candidateLayers) {
+    var dlg = new Window("dialog", "口パクレイヤーを選択");
     dlg.orientation = "column";
     dlg.alignChildren = ["fill", "top"];
     dlg.spacing = 8;
@@ -2853,33 +2854,33 @@
     var msg = dlg.add(
       "statictext",
       undefined,
-      "「" + layerName + "」は複数の口形に一致します。割当先を選んでください。",
+      "「" +
+        rowLabel +
+        "」に使う口パクレイヤーを 1 つ選んでください（2 つ割り当てると口が二重表示になります）。",
       { multiline: true }
     );
-    msg.preferredSize = [320, 36];
+    msg.preferredSize = [340, 40];
 
     var listGroup = dlg.add("group");
     listGroup.orientation = "column";
     listGroup.alignChildren = ["fill", "top"];
     var dd = listGroup.add("dropdownlist");
     dd.alignment = ["fill", "top"];
-    for (var i = 0; i < candidateRows.length; i++) {
-      var lbl = candidateRows[i].labelInput.text || "（無名）";
-      var csv = candidateRows[i].csvInput.text || "";
-      dd.add("item", lbl + (csv ? "  [" + csv + "]" : ""));
+    for (var i = 0; i < candidateLayers.length; i++) {
+      dd.add("item", candidateLayers[i].name);
     }
     dd.selection = 0;
 
     var btnRow = dlg.add("group");
     btnRow.orientation = "row";
     btnRow.alignment = ["right", "top"];
-    var skipBtn = btnRow.add("button", undefined, "スキップ");
+    var skipBtn = btnRow.add("button", undefined, "割り当てない");
     var okBtn = btnRow.add("button", undefined, "割当", { name: "ok" });
 
     var result = { chosen: null };
     okBtn.onClick = function () {
       result.chosen =
-        dd.selection !== null ? candidateRows[dd.selection.index] : null;
+        dd.selection !== null ? candidateLayers[dd.selection.index] : null;
       dlg.close();
     };
     skipBtn.onClick = function () {
@@ -2902,8 +2903,8 @@
       mouthRows[r].layers = [];
     }
 
-    // 各行のラベルから取り出したキーがレイヤー名に含まれれば候補。
-    // 閉じ口の行を先に並べて優先順位の基準にする（「閉」が他より勝つ）。
+    // 行（口形）ごとに、一致する口パクレイヤーを集める。閉じ口を先に処理して
+    // 「閉」が母音より先にレイヤーを取れるようにする。
     var order = [];
     for (r = 0; r < mouthRows.length; r++) {
       if (mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
@@ -2912,12 +2913,15 @@
       if (!mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
     }
 
-    for (var i = 0; i < comp.selectedLayers.length; i++) {
-      var layer = comp.selectedLayers[i];
-      // この層に一致する行をすべて集める
-      var candidates = [];
-      for (var j = 0; j < order.length; j++) {
-        var keys = mouthMatchKeys(order[j].labelInput.text);
+    // 1 レイヤーは 1 行までしか使わない（重複割当を防ぐ）
+    var used = {};
+    for (var oi = 0; oi < order.length; oi++) {
+      var rowData = order[oi];
+      var keys = mouthMatchKeys(rowData.labelInput.text);
+      var matches = [];
+      for (var i = 0; i < comp.selectedLayers.length; i++) {
+        if (used[i]) continue;
+        var layer = comp.selectedLayers[i];
         var hit = false;
         for (var ki = 0; ki < keys.length; ki++) {
           if (keys[ki] && layer.name.indexOf(keys[ki]) >= 0) {
@@ -2925,18 +2929,30 @@
             break;
           }
         }
-        if (hit) candidates.push(order[j]);
+        if (hit) matches.push({ idx: i, layer: layer });
       }
-      if (candidates.length === 0) continue;
-      var target;
-      if (candidates.length === 1) {
-        target = candidates[0];
+      if (matches.length === 0) continue;
+
+      var chosenIdx = -1;
+      if (matches.length === 1) {
+        chosenIdx = matches[0].idx;
       } else {
-        // 候補が複数 → 選択させる(#G)。スキップ可
-        target = pickMouthRowDialog(layer.name, candidates);
-        if (!target) continue;
+        // 複数の口パクレイヤーが一致 → 1 枚だけ選ばせる（二重表示を防ぐ）
+        var layersOnly = [];
+        for (var m = 0; m < matches.length; m++) layersOnly.push(matches[m].layer);
+        var picked = pickMouthLayerDialog(rowData.labelInput.text, layersOnly);
+        if (!picked) continue; // 割り当てない
+        for (var m2 = 0; m2 < matches.length; m2++) {
+          if (matches[m2].layer === picked) {
+            chosenIdx = matches[m2].idx;
+            break;
+          }
+        }
+        if (chosenIdx < 0) continue;
       }
-      target.layers.push(layer);
+      // 1 行 = 1 口パクレイヤー（二重表示にしない）
+      rowData.layers = [comp.selectedLayers[chosenIdx]];
+      used[chosenIdx] = true;
       assignedCount++;
     }
 
