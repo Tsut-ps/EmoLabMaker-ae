@@ -5447,6 +5447,15 @@
   stageRefreshBtn.preferredSize = [52, BUTTON_HEIGHT];
   stageRefreshBtn.helpTip = "コンポ一覧・階層・現在状態を再取得（再生ヘッド移動後に押す）";
 
+  // スクロール用ボタン（AE の ScriptUI はマウスホイールを受け取れないため、
+  // クリックで確実にスクロールできる手段を用意する）
+  var stageScrollUpBtn = stageTopRow.add("button", undefined, "▲");
+  stageScrollUpBtn.preferredSize = [26, BUTTON_HEIGHT];
+  stageScrollUpBtn.helpTip = "ツリーを上にスクロール";
+  var stageScrollDownBtn = stageTopRow.add("button", undefined, "▼");
+  stageScrollDownBtn.preferredSize = [26, BUTTON_HEIGHT];
+  stageScrollDownBtn.helpTip = "ツリーを下にスクロール";
+
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
@@ -5624,6 +5633,19 @@
     if (v > stageScroll.maxvalue) v = stageScroll.maxvalue;
     applyStageScroll(v);
   }
+  // 1 クリックで「ほぼ 1 画面分」スクロールする（dir: -1=上 / +1=下）
+  function scrollStagePage(dir) {
+    var ph = stageGridPanel.size ? stageGridPanel.size.height : 200;
+    var page = (ph - 20) * 0.85;
+    if (page < 40) page = 40;
+    scrollStageBy(dir * page);
+  }
+  stageScrollUpBtn.onClick = function () {
+    scrollStagePage(-1);
+  };
+  stageScrollDownBtn.onClick = function () {
+    scrollStagePage(1);
+  };
   function attachStageWheel(ctrl) {
     try {
       ctrl.addEventListener("mousewheel", function (ev) {
