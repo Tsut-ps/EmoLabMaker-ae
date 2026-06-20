@@ -418,6 +418,11 @@
     try {
       layer.outPoint = ctrlComp.duration;
     } catch (e) {}
+    // 制御ヌルは最下部へ。addNull は最上位(index 1)に積むため、複数作ると
+    // 立ち絵の上に逆順で重なってしまう。最下部に集めると作成順かつ邪魔にならない。
+    try {
+      layer.moveToEnd();
+    } catch (eMove) {}
     hideCtrlLayer(layer, name);
     return layer;
   }
@@ -5304,6 +5309,7 @@
           comp: comp,
           depth: depth,
           displayName: comp.name,
+          isRoot: isRoot,
           radioChoices: radio,
           optionalChoices: optional,
           forcedChoices: forced,
@@ -5903,7 +5909,11 @@
     if (common) prefixCandidates.push(common);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
-      nd.displayName = stageDisplayName(nd.comp.name, prefixCandidates);
+      // ルート直下に置かれた選択肢は「立ち絵全体の切替」。立ち絵名そのままだと
+      // 階層ヘッダと紛らわしいので（ルート）と明示する(#ルート対応)
+      nd.displayName = nd.isRoot
+        ? "（ルート）"
+        : stageDisplayName(nd.comp.name, prefixCandidates);
       nd.ctrlComp =
         (nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null) ||
         stageCtrlComp;
