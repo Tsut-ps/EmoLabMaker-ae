@@ -5372,14 +5372,25 @@
 
   // active 伝播: 上位コンポ参照(*)が選択されていない階層は active=false。
   // DFS順(親が子より前)前提で、depth-1 の直近ノードを親とみなす。
+  // ルート直下のパートは flatten で depth0 になるため、その親はルートノードにする
+  // （ヘッダの ☑/◉ がルートの制御へ正しく書き込めるように）。
   // 各ノードの visibleSet は事前に解決済みであること。
   function computeStageActive(nodes) {
     var lastAtDepth = {};
+    var rootNode = null;
     for (var i = 0; i < nodes.length; i++) {
       var nn = nodes[i];
-      var parent = nn.depth === 0 ? null : lastAtDepth[nn.depth - 1] || null;
+      if (nn.isRoot && rootNode === null) rootNode = nn;
+      var parent;
+      if (nn.isRoot) {
+        parent = null;
+      } else if (nn.depth === 0) {
+        parent = rootNode; // 立ち絵直下(depth0)の親はルート
+      } else {
+        parent = lastAtDepth[nn.depth - 1] || null;
+      }
       nn.parent = parent; // 折りたたみ判定にも使う
-      if (nn.depth === 0) {
+      if (nn.isRoot) {
         nn.active = true;
       } else {
         var refVisible;
@@ -5638,6 +5649,80 @@
     stageSetDropdown.selection = 0;
   }
 
+  // ノードのヘッダ部にラベル（とフォルダ自身の表示コントロール）を出す。
+  //   ルート       → ただのラベル（statictext）
+  //   ! フォルダ   → グレーの☑（常時表示。cfgShowForced オフ時はラベルのみ）
+  //   * フォルダ   → ラジオ（親の排他グループの一員。クリックで親に書き込み）
+  //   無印フォルダ → チェックボックス（丸ごと表示/非表示。クリックで親に書き込み）
+  // 親側ではこのフォルダを選択肢として重複表示しない（emittedRefNames で除外済み）。
+  function renderStageHeader(head, node) {
+    var lblText = node.displayName;
+    var parent = node.parent;
+    var kind = null;
+    if (!node.isRoot && node.refName && parent) {
+      if (node.refForced) {
+        kind = cfgShowForced ? "headerForced" : null;
+      } else if (node.refExclusive) {
+        kind = "headerRadio";
+      } else {
+        kind = "headerOpt";
+      }
+    }
+
+    if (!kind) {
+      var lbl = head.add("statictext", undefined, lblText);
+      lbl.helpTip = node.comp.name;
+      return;
+    }
+
+    var ctrl =
+      kind === "headerRadio"
+        ? head.add("radiobutton", undefined, lblText)
+        : head.add("checkbox", undefined, lblText);
+    ctrl.helpTip =
+      node.refName + (kind === "headerForced" ? "（常に表示 !）" : "");
+    var on = indexOfName(parent.visibleSet, node.refName) >= 0;
+    ctrl.value = kind === "headerForced" ? true : on;
+    stageButtons.push({ ctrl: ctrl, headerNode: node, kind: kind });
+
+    if (kind === "headerForced") {
+      ctrl.enabled = false;
+      return;
+    }
+    ctrl.enabled = parent.active;
+    ctrl.onClick = function () {
+      if (!parent.ctrlComp) {
+        setStageStatus("制御コンポが見つかりません。");
+        return;
+      }
+      var time = parent.ctrlComp.time;
+      beginUndo("emo2layer: 立ち絵 切替");
+      try {
+        ensureNodeRegistered(parent);
+        if (kind === "headerRadio") {
+          setRadioSelection(
+            parent.ctrlComp,
+            parent.comp.name,
+            time,
+            node.refName,
+            collectRadioVariantNames(parent)
+          );
+        } else {
+          toggleLayerInSet(
+            parent.ctrlComp,
+            parent.comp.name,
+            time,
+            node.refName
+          );
+        }
+      } finally {
+        endUndo();
+      }
+      setStageStatus(node.displayName);
+      syncStageControls();
+    };
+  }
+
   function rebuildStageTree() {
     if (isRebuildingStage) return;
     isRebuildingStage = true;
@@ -5654,7 +5739,6 @@
         );
         empty.alignment = ["fill", "top"];
         stageGrid.layout.layout(true);
-        stageGridPanel.layout.layout(true);
         applyStageScroll(0);
         return;
       }
@@ -5666,6 +5750,15 @@
       stageButtons = [];
       stageWarnings = [];
 
+      // 自分のノード（ヘッダ）を持つフォルダ参照の集合。これらは親の選択肢として
+      // 重複表示せず、ヘッダ行の ☑/◉ に集約する（▼☑その他 の形）。
+      var emittedRefNames = {};
+      for (var en = 0; en < stageNodes.length; en++) {
+        if (stageNodes[en].refName) {
+          emittedRefNames[stageNodes[en].refName] = true;
+        }
+      }
+
       for (var n = 0; n < stageNodes.length; n++) {
         var node = stageNodes[n];
         // 祖先のいずれかが折りたたまれていれば隠す
@@ -5675,7 +5768,32 @@
 
         var indent = node.depth * cfgIndentWidth;
 
-        // 1ノード = ヘッダ行（インデント+トグル+ラベル）+ 折り返した選択肢行
+        // 選択肢を radio→optional(→forced) の順にフラット化。ただしヘッダを持つ
+        // 子フォルダ（emittedRefNames）は親の選択肢として出さない（ヘッダに集約）。
+        var items = [];
+        var rr;
+        for (rr = 0; rr < node.radioChoices.length; rr++) {
+          if (emittedRefNames[node.radioChoices[rr].fullName]) continue;
+          items.push({ ch: node.radioChoices[rr], kind: "radio" });
+        }
+        for (rr = 0; rr < node.optionalChoices.length; rr++) {
+          if (emittedRefNames[node.optionalChoices[rr].fullName]) continue;
+          items.push({ ch: node.optionalChoices[rr], kind: "opt" });
+        }
+        if (cfgShowForced) {
+          for (rr = 0; rr < node.forcedChoices.length; rr++) {
+            if (emittedRefNames[node.forcedChoices[rr].fullName]) continue;
+            items.push({ ch: node.forcedChoices[rr], kind: "forced" });
+          }
+        }
+
+        // ルート（外側コンポ含む）が、フォルダ参照しか持たず自前のリーフ選択肢が
+        // 無ければ「（ルート）」行ごと省略（各パートは自分のヘッダに ☑/◉ で出る）。
+        if (node.isRoot && items.length === 0) {
+          continue;
+        }
+
+        // 1ノード = ヘッダ行（インデント+トグル+自身の☑/◉+ラベル）+ 折り返した選択肢行
         var block = stageGrid.add("group");
         block.orientation = "column";
         block.alignment = ["fill", "top"];
@@ -5692,13 +5810,8 @@
         }
 
         var isCollapsed = !!stageCollapsed[node.comp.id];
-        // 折りたたみ対象: 子コンポを持つ階層だけでなく、自身が選択肢を持つ階層
-        // （目/口/服 のような末端グループ）も「コンポジションごとに」たためる(#J)
-        var nodeHasChoices =
-          node.radioChoices.length > 0 ||
-          node.optionalChoices.length > 0 ||
-          (cfgShowForced && node.forcedChoices.length > 0);
-        var collapsible = node.hasChildren || nodeHasChoices;
+        // 折りたたみ対象: 子コンポを持つ階層、または自身が選択肢を持つ階層
+        var collapsible = node.hasChildren || items.length > 0;
         if (collapsible) {
           // AE標準のツイスト三角（▼=展開 / ▶=折りたたみ）。枠なしのクリック可能ラベル
           var tg = head.add("statictext", undefined, isCollapsed ? "▶" : "▼");
@@ -5719,8 +5832,9 @@
           sp2.preferredSize = [14, 1];
         }
 
-        var lbl = head.add("statictext", undefined, node.displayName);
-        lbl.helpTip = node.comp.name;
+        // 非ルートのフォルダ参照は、ヘッダ自体を ☑(無印)/◉(*)/グレー☑(!) にして
+        // ラベルと一体化する（▼☑その他）。親側の重複選択肢は出していない。
+        renderStageHeader(head, node);
 
         // すべてラジオなのに何も選択されていない階層は警告を出す
         var warn = head.add("statictext", undefined, "⚠ 未選択");
@@ -5733,21 +5847,6 @@
         // 折りたたみ時は子ノードだけでなく、このノード直下の選択肢も隠す
         // （ヘッダ＋トグルのみ残す）
         if (isCollapsed) continue;
-
-        // 選択肢を radio→optional の順でフラット化し、幅で折り返す
-        var items = [];
-        var rr;
-        for (rr = 0; rr < node.radioChoices.length; rr++) {
-          items.push({ ch: node.radioChoices[rr], kind: "radio" });
-        }
-        for (rr = 0; rr < node.optionalChoices.length; rr++) {
-          items.push({ ch: node.optionalChoices[rr], kind: "opt" });
-        }
-        if (cfgShowForced) {
-          for (rr = 0; rr < node.forcedChoices.length; rr++) {
-            items.push({ ch: node.forcedChoices[rr], kind: "forced" });
-          }
-        }
 
         var choiceIndent = indent + 26;
         // 折り返し幅。安全マージンは小さめにして横幅を有効活用する
@@ -5858,8 +5957,11 @@
         }
       }
 
+      // 中身(stageGrid)だけをコンテンツサイズに整える。パネル自体を
+      // layout(true) すると、ウィンドウから与えられた高さを無視して中身に
+      // 合わせて伸縮し、リサイズ時にスクロールバーが壊れる。パネルの大きさは
+      // ウィンドウのレイアウトに任せ、ここでは触らない。
       stageGrid.layout.layout(true);
-      stageGridPanel.layout.layout(true);
       applyStageScroll(stageScrollValue);
     } finally {
       isRebuildingStage = false;
@@ -5973,7 +6075,16 @@
     for (var i = 0; i < stageButtons.length; i++) {
       var e = stageButtons[i];
       try {
-        if (e.kind === "forced") continue;
+        if (e.kind === "forced" || e.kind === "headerForced") continue;
+        if (e.kind === "headerRadio" || e.kind === "headerOpt") {
+          // ヘッダのフォルダ参照コントロール: 親の visibleSet で状態を更新
+          var hp = e.headerNode.parent;
+          e.ctrl.value = hp
+            ? indexOfName(hp.visibleSet, e.headerNode.refName) >= 0
+            : false;
+          e.ctrl.enabled = hp ? hp.active : true;
+          continue;
+        }
         e.ctrl.value = choiceIsVisible(e.ch, e.node.visibleSet);
         e.ctrl.enabled = e.node.active;
       } catch (err) {}
