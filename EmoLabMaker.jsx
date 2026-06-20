@@ -52,6 +52,19 @@
       app.settings.saveSetting(SETTINGS_SECTION, key, String(val));
     } catch (e) {}
   }
+  function getSettingStr(key, def) {
+    try {
+      if (app.settings.haveSetting(SETTINGS_SECTION, key)) {
+        return app.settings.getSetting(SETTINGS_SECTION, key);
+      }
+    } catch (e) {}
+    return def;
+  }
+  function setSettingStr(key, val) {
+    try {
+      app.settings.saveSetting(SETTINGS_SECTION, key, String(val));
+    } catch (e) {}
+  }
 
   // 立ち絵タブの表示設定（起動時に読み込み）
   var cfgFollowPlayhead = getSettingBool("followPlayhead", true);
@@ -68,6 +81,11 @@
   var cfgImportLab = getSettingBool("importLab", true); // .lab → 口パクマーカー
   var cfgImportTxt = getSettingBool("importTxt", true); // .txt → テキスト(字幕)レイヤー
   var cfgImportWav = getSettingBool("importWav", true); // .wav → 音声レイヤー
+  // 一括読み込みで配置する音素（空＝すべて）。既定は母音＋ん＋閉じ系
+  var cfgImportPhonemes = getSettingStr(
+    "importPhonemes",
+    "a,i,u,e,o,N,pau,sil,cl,Q,br"
+  );
 
   // ════════════════════════════════════════════════════════════════
   // 共通ユーティリティ
@@ -1681,6 +1699,37 @@
     setSettingBool("importWav", cfgImportWav);
   };
 
+  // 配置する音素の絞り込み（空＝すべて）(#M)
+  var bulkPhonemeRow = bulkPanel.add("group");
+  bulkPhonemeRow.orientation = "row";
+  bulkPhonemeRow.alignChildren = ["left", "center"];
+  bulkPhonemeRow.spacing = 4;
+  bulkPhonemeRow.add("statictext", undefined, "音素:");
+  var bulkPhonemeInput = bulkPhonemeRow.add("edittext", undefined, cfgImportPhonemes);
+  bulkPhonemeInput.preferredSize = [180, BUTTON_HEIGHT];
+  bulkPhonemeInput.helpTip =
+    "配置する音素をカンマ区切りで指定（空＝すべて）。既定は母音＋ん＋閉じ系";
+  bulkPhonemeInput.onChange = function () {
+    cfgImportPhonemes = bulkPhonemeInput.text;
+    setSettingStr("importPhonemes", cfgImportPhonemes);
+  };
+  var bulkPhonemeVowelBtn = bulkPhonemeRow.add("button", undefined, "母音+ん");
+  bulkPhonemeVowelBtn.preferredSize = [64, BUTTON_HEIGHT];
+  bulkPhonemeVowelBtn.helpTip = "口パクの基本セット（a,i,u,e,o,N,pau,sil,cl,Q,br）に戻す";
+  bulkPhonemeVowelBtn.onClick = function () {
+    bulkPhonemeInput.text = "a,i,u,e,o,N,pau,sil,cl,Q,br";
+    cfgImportPhonemes = bulkPhonemeInput.text;
+    setSettingStr("importPhonemes", cfgImportPhonemes);
+  };
+  var bulkPhonemeAllBtn = bulkPhonemeRow.add("button", undefined, "すべて");
+  bulkPhonemeAllBtn.preferredSize = [56, BUTTON_HEIGHT];
+  bulkPhonemeAllBtn.helpTip = "すべての音素を配置（絞り込みなし）";
+  bulkPhonemeAllBtn.onClick = function () {
+    bulkPhonemeInput.text = "";
+    cfgImportPhonemes = "";
+    setSettingStr("importPhonemes", "");
+  };
+
   var bulkBtnRow = bulkPanel.add("group");
   bulkBtnRow.orientation = "row";
   bulkBtnRow.alignChildren = ["fill", "center"];
@@ -1725,6 +1774,7 @@
       wav: cfgImportWav,
       offsetSec: t.offsetSec,
       autoClose: cfgLabAutoClose,
+      phonemeFilter: normalizeCsvTokens(bulkPhonemeInput.text),
     };
     var total = { wav: 0, txt: 0, lab: 0 };
     beginUndo("lab2layer: ファイル一括読み込み");
@@ -1791,7 +1841,15 @@
         var any = false;
         if (cfgImportLab && labF.exists) {
           if (
-            placeLabFileOnLayer(layer, attach, labF, base, t.offsetSec, cfgLabAutoClose)
+            placeLabFileOnLayer(
+              layer,
+              attach,
+              labF,
+              base,
+              t.offsetSec,
+              cfgLabAutoClose,
+              normalizeCsvTokens(bulkPhonemeInput.text)
+            )
           ) {
             labCount++;
             any = true;
@@ -2049,8 +2107,29 @@
     return s;
   }
 
+  // 音素列を指定セット(配列)だけに絞り込む。filterArr が空/null なら全て通す。(#M)
+  function filterPhonemes(phs, filterArr) {
+    if (!filterArr || filterArr.length === 0) return phs;
+    var allow = {};
+    for (var i = 0; i < filterArr.length; i++) allow[filterArr[i]] = true;
+    var out = [];
+    for (var j = 0; j < phs.length; j++) {
+      if (allow[phs[j].phoneme]) out.push(phs[j]);
+    }
+    return out;
+  }
+
   // .lab ファイルを読み、target レイヤーに口パクマーカーを配置する
-  function placeLabFileOnLayer(targetLayer, attachTime, labFileObj, base, offsetSec, autoClose) {
+  // phonemeFilter: 配置する音素名の配列（省略/空ならすべて）
+  function placeLabFileOnLayer(
+    targetLayer,
+    attachTime,
+    labFileObj,
+    base,
+    offsetSec,
+    autoClose,
+    phonemeFilter
+  ) {
     var content = "";
     try {
       labFileObj.open("r");
@@ -2059,7 +2138,10 @@
     } catch (e) {
       return false;
     }
-    var phs = flattenLabEntries(parseLabPhonemeEntries(content));
+    var phs = filterPhonemes(
+      flattenLabEntries(parseLabPhonemeEntries(content)),
+      phonemeFilter
+    );
     if (phs.length === 0) return false;
     if (targetLayer.name.indexOf("[Lab] ") !== 0) {
       targetLayer.name = "[Lab] " + base;
@@ -2094,7 +2176,17 @@
         target = comp.layers.addNull(comp.duration);
         target.startTime = attachTime;
       }
-      if (placeLabFileOnLayer(target, attachTime, group.lab, group.base, opts.offsetSec, opts.autoClose)) {
+      if (
+        placeLabFileOnLayer(
+          target,
+          attachTime,
+          group.lab,
+          group.base,
+          opts.offsetSec,
+          opts.autoClose,
+          opts.phonemeFilter
+        )
+      ) {
         rep.lab++;
       }
     }
@@ -2499,7 +2591,7 @@
   );
   mouthMapPanel.orientation = "column";
   mouthMapPanel.alignChildren = ["fill", "top"];
-  mouthMapPanel.alignment = ["fill", "top"];
+  mouthMapPanel.alignment = ["fill", "fill"];
   mouthMapPanel.spacing = 4;
   mouthMapPanel.margins = 10;
 
@@ -2510,14 +2602,77 @@
   );
   mouthMapHint.alignment = ["fill", "top"];
 
-  // 口形の行はこのグループに動的に追加する（追加/削除に対応）
-  var mouthRowsGroup = mouthMapPanel.add("group");
+  // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
+  // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)
+  var mouthRowsClip = mouthMapPanel.add("panel");
+  mouthRowsClip.alignment = ["fill", "fill"];
+  mouthRowsClip.margins = 2;
+  mouthRowsClip.preferredSize = [-1, 168];
+
+  var mouthRowsGroup = mouthRowsClip.add("group");
   mouthRowsGroup.orientation = "column";
   mouthRowsGroup.alignChildren = ["fill", "top"];
-  mouthRowsGroup.alignment = ["fill", "top"];
   mouthRowsGroup.spacing = 2;
 
+  var mouthRowsScroll = mouthRowsClip.add("scrollbar", undefined, 0, 0, 100);
+  mouthRowsScroll.visible = false;
+  var mouthRowsScrollValue = 0;
+
   var mouthRows = [];
+
+  // 口形行領域のスクロール: 中身(mouthRowsGroup)を上下に動かし、パネルでクリップ
+  function applyMouthScroll(value) {
+    try {
+      var m = 2;
+      var pw = mouthRowsClip.size ? mouthRowsClip.size.width : 360;
+      var ph = mouthRowsClip.size ? mouthRowsClip.size.height : 168;
+      var sbW = 14;
+      var innerH = ph - m * 2;
+      var contentH = mouthRowsGroup.size ? mouthRowsGroup.size.height : 0;
+      var maxv = contentH - innerH;
+      if (maxv < 0) maxv = 0;
+      if (value === undefined || value === null || value < 0) value = 0;
+      if (value > maxv) value = maxv;
+      mouthRowsScrollValue = value;
+      mouthRowsGroup.location = [m, m - value];
+      mouthRowsScroll.location = [pw - sbW - m, m];
+      mouthRowsScroll.size = [sbW, innerH];
+      mouthRowsScroll.minvalue = 0;
+      mouthRowsScroll.maxvalue = maxv > 0 ? maxv : 1;
+      mouthRowsScroll.value = value;
+      mouthRowsScroll.visible = maxv > 0;
+    } catch (e) {}
+  }
+  function refreshMouthScroll() {
+    try {
+      mouthRowsGroup.layout.layout(true);
+      mouthRowsClip.layout.layout(true);
+    } catch (e) {}
+    applyMouthScroll(mouthRowsScrollValue);
+  }
+  mouthRowsScroll.onChanging = mouthRowsScroll.onChange = function () {
+    try {
+      mouthRowsScrollValue = mouthRowsScroll.value;
+      mouthRowsGroup.location = [2, 2 - mouthRowsScroll.value];
+    } catch (e) {}
+  };
+  try {
+    mouthRowsClip.addEventListener("mousewheel", function (ev) {
+      if (!mouthRowsScroll.visible) return;
+      var d = 0;
+      try {
+        if (ev.deltaY !== undefined && ev.deltaY !== null) d = ev.deltaY;
+        else if (ev.wheelDelta !== undefined && ev.wheelDelta !== null)
+          d = -ev.wheelDelta;
+        else if (ev.detail !== undefined && ev.detail !== null) d = ev.detail;
+      } catch (eD) {}
+      if (d === 0) return;
+      var v = mouthRowsScrollValue + (d > 0 ? 30 : -30);
+      if (v < 0) v = 0;
+      if (v > mouthRowsScroll.maxvalue) v = mouthRowsScroll.maxvalue;
+      applyMouthScroll(v);
+    });
+  } catch (eW) {}
 
   // ラベルから自動割当用のキーを取り出す（"ん(閉)" → ["ん","閉"]、"あ" → ["あ"]）
   function mouthMatchKeys(label) {
@@ -2609,6 +2764,7 @@
       try {
         mouthRowsGroup.remove(row);
         mouthMapPanel.layout.layout(true);
+        refreshMouthScroll();
       } catch (e) {}
     };
     return rowData;
@@ -2633,6 +2789,7 @@
     addMouthRow("", "", false);
     try {
       mouthMapPanel.layout.layout(true);
+      refreshMouthScroll();
     } catch (e) {}
   };
 
@@ -2787,6 +2944,7 @@
     }
     try {
       mouthMapPanel.layout.layout(true);
+      refreshMouthScroll();
     } catch (e2) {}
   }
 
@@ -2882,6 +3040,7 @@
     }
     try {
       mouthMapPanel.layout.layout(true);
+      refreshMouthScroll();
     } catch (eL) {}
     setStatus(
       "現在のマッピングを取り込みました（" + groups.length + " 口形）。"
@@ -5930,12 +6089,14 @@
     this.layout.resize();
     if (tabs.selection === tabSelector) resizeGrid();
     else if (tabs.selection === tabStage) rebuildStageTree();
+    else if (tabs.selection === tabLab) refreshMouthScroll();
   };
 
   // タブ切替時に最新化（立ち絵=階層再取得 / PSD=コンポ一覧を更新）
   tabs.onChange = function () {
     if (tabs.selection === tabStage) refreshStage(true);
     else if (tabs.selection === tabPsd) refreshPsdDropdowns();
+    else if (tabs.selection === tabLab) refreshMouthScroll();
   };
 
   // 再生ヘッド追従: パネルがアクティブになったら、既存ボタンのグリフ/有効状態だけ
@@ -5960,6 +6121,7 @@
     rebuildStageRootDropdown(name);
     rebuildList();
     refreshStage(false);
+    refreshMouthScroll();
   })();
 
   if (win instanceof Window) {
