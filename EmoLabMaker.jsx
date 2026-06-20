@@ -5755,6 +5755,7 @@
         );
         empty.alignment = ["fill", "top"];
         stageGrid.layout.layout(true);
+        stageGridPanel.layout.layout(true);
         applyStageScroll(0);
         return;
       }
@@ -5973,11 +5974,25 @@
         }
       }
 
-      // 中身(stageGrid)だけをコンテンツサイズに整える。パネル自体を
-      // layout(true) すると、ウィンドウから与えられた高さを無視して中身に
-      // 合わせて伸縮し、リサイズ時にスクロールバーが壊れる。パネルの大きさは
-      // ウィンドウのレイアウトに任せ、ここでは触らない。
+      // 中身(stageGrid)を整形してから配置する。panel.layout.layout(true) は
+      // 中身の配置に必要だが、パネル自身をコンテンツ高さに伸縮させてしまい、
+      // ウィンドウの高さ変更時にスクロールバーが壊れる。そこでウィンドウから
+      // 与えられたパネルサイズを退避し、レイアウト後に復元する。
+      var savedPanelW = null;
+      var savedPanelH = null;
+      try {
+        if (stageGridPanel.size) {
+          savedPanelW = stageGridPanel.size.width;
+          savedPanelH = stageGridPanel.size.height;
+        }
+      } catch (eSz) {}
       stageGrid.layout.layout(true);
+      stageGridPanel.layout.layout(true);
+      try {
+        if (savedPanelW !== null) {
+          stageGridPanel.size = [savedPanelW, savedPanelH];
+        }
+      } catch (eSz2) {}
       applyStageScroll(stageScrollValue);
     } finally {
       isRebuildingStage = false;
