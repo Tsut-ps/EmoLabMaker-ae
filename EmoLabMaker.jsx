@@ -4417,7 +4417,15 @@
         while (nm.length > 0 && (nm.charAt(0) === "*" || nm.charAt(0) === "!")) {
           nm = nm.substring(1);
         }
-        var newName = mode === "*" ? "*" + nm : mode === "!" ? "!" + nm : nm;
+        // ネストした三項演算子は ExtendScript で誤評価され得るので if/else で明示する
+        var newName;
+        if (mode === "*") {
+          newName = "*" + nm;
+        } else if (mode === "!") {
+          newName = "!" + nm;
+        } else {
+          newName = nm;
+        }
         if (newName !== L.name) {
           try {
             L.name = newName;
@@ -4499,7 +4507,10 @@
       "if (!hasMid && phase === 1) phase = 2;",
       // このレイヤーが受け持つ位相（開き=0 / 中間=1 / 閉じ=2）。
       // phase は単一値なので「phase === rolePhase」で必ず1枚だけが一致＝排他確定。
-      'var rolePhase = (role === "open") ? 0 : (role === "mid") ? 1 : 2;',
+      // ネストした三項演算子は誤評価され得るので if/else で明示する。
+      "var rolePhase = 2;",
+      'if (role === "open") rolePhase = 0;',
+      'else if (role === "mid") rolePhase = 1;',
     ]);
 
     if (emoCtx) {
@@ -5377,14 +5388,18 @@
   var cbFlipY = stageFlipRow.add("checkbox", undefined, "上下反転");
   cbFlipY.helpTip = "立ち絵全体を上下反転（Scale Y を -100%）";
   function onStageFlipToggle() {
-    var st =
-      cbFlipX.value && cbFlipY.value
-        ? "flipxy"
-        : cbFlipX.value
-        ? "flipx"
-        : cbFlipY.value
-        ? "flipy"
-        : "";
+    // ネストした三項演算子は ExtendScript で誤評価され得る（左右が上下になる等）
+    // ため if/else で明示する
+    var st;
+    if (cbFlipX.value && cbFlipY.value) {
+      st = "flipxy";
+    } else if (cbFlipX.value) {
+      st = "flipx";
+    } else if (cbFlipY.value) {
+      st = "flipy";
+    } else {
+      st = "";
+    }
     applyStageFlip(st);
   }
   cbFlipX.onClick = onStageFlipToggle;
