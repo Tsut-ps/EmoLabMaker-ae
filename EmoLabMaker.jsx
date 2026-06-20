@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 1.21.0
+ * @version 1.21.1
  * @description 立ち絵 + 口パク + 目パチ + PSDセットアップ + 詳細 統合パネル
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
  *                 マーカーは「表示中レイヤー名の集合」で、ラジオ(*)と任意指定(無印)を統一的に扱う
@@ -169,15 +169,48 @@
     }
   }
 
-  // 制御コンポ候補 = どのコンポでも可。ただし PSD 内部の「XXXX レイヤー」
-  // フォルダ内のコンポ（反転バリエーション等の内部グループ）は除外する。
+  // rootComp の配下にネストされた全コンポ（部品）を seen に記録（rootComp 自身は含めない）
+  function collectStageDescendants(rootComp, seen) {
+    if (!rootComp) return;
+    for (var i = 1; i <= rootComp.numLayers; i++) {
+      var src = null;
+      try {
+        src = rootComp.layer(i).source;
+      } catch (e) {}
+      if (src && src instanceof CompItem && !seen[src.id]) {
+        seen[src.id] = true;
+        collectStageDescendants(src, seen);
+      }
+    }
+  }
+
+  // 制御コンポ候補。制御は「全体設定」なので、PSD立ち絵ルートより下（口・目などの
+  // 部品コンポ）には置けないようにする。ルート自身・シーンコンポ・無関係コンポは可。
+  //   除外: 「XXXX レイヤー」フォルダ内のコンポ／立ち絵ルート配下の部品コンポ
+  //   立ち絵ルート = 「<名前> レイヤー」フォルダを持つコンポ（PSD取込の本体）
   function collectCtrlCandidates() {
     var all = getProjectComps();
-    var out = [];
-    for (var i = 0; i < all.length; i++) {
-      if (isInsidePsdLayersFolder(all[i])) continue;
-      out.push(all[i]);
+    var roots = [];
+    var rootIds = {};
+    var i;
+    for (i = 0; i < all.length; i++) {
+      if (hasPsdLayersFolder(all[i])) {
+        roots.push(all[i]);
+        rootIds[all[i].id] = true;
+      }
     }
+    var descendants = {};
+    for (i = 0; i < roots.length; i++) {
+      collectStageDescendants(roots[i], descendants);
+    }
+    var out = [];
+    for (i = 0; i < all.length; i++) {
+      var c = all[i];
+      if (isInsidePsdLayersFolder(c)) continue; // レイヤーフォルダ内の部品
+      if (descendants[c.id] && !rootIds[c.id]) continue; // ルート配下の部品コンポ
+      out.push(c);
+    }
+    if (out.length === 0) return all; // 検出できなければ全件（安全側）
     return out;
   }
 
@@ -3904,7 +3937,7 @@
 
   var psdCtrlRow = addPsdCompRow("制御");
   psdCtrlRow.dropdown.helpTip =
-    "表情マーカーを書き込むコンポ（どのコンポでも可。通常はルートと同じでOK。PSDの「XXXX レイヤー」フォルダ内の内部コンポは除外）";
+    "表情マーカーを書き込むコンポ（全体設定）。通常はルートと同じでOK。立ち絵ルートより下の部品コンポ（口・目など）やレイヤーフォルダ内は候補に出ません";
 
   var psdSetupBtn = tabPsd.add(
     "button",
