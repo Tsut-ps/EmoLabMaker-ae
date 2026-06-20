@@ -403,7 +403,7 @@
     } catch (e) {}
   }
 
-  function createCtrlLayer(ctrlComp, targetCompName) {
+  function createCtrlLayer(ctrlComp, targetCompName, afterLayer) {
     var name = getCtrlLayerName(targetCompName);
     var existing = findCtrlLayerInComp(ctrlComp, targetCompName, 0);
     if (existing) {
@@ -418,17 +418,15 @@
     try {
       layer.outPoint = ctrlComp.duration;
     } catch (e) {}
-    // 制御ヌルは最上位に置いてよいが、addNull は新規を index 1 に積むため
-    // 複数作ると「逆順」に並ぶ。既存の制御ヌルの直後へ移動して作成順を保つ。
-    try {
-      var lastCtrl = null;
-      for (var li = 1; li <= ctrlComp.numLayers; li++) {
-        var other = ctrlComp.layer(li);
-        if (other === layer) continue;
-        if (other.name.indexOf(CTRL_PREFIX) === 0) lastCtrl = other;
-      }
-      if (lastCtrl) layer.moveAfter(lastCtrl);
-    } catch (eMove) {}
+    // addNull は新規を最上位(index 1)に積むため、同一セットアップで複数作ると
+    // 逆順になる。afterLayer（同じ実行で直前に作ったヌル）の直後へ移すと、
+    // 元の「最上位に置く」配置を保ったまま作成順に並ぶ。afterLayer 省略時は
+    // 最上位のまま（他の立ち絵の制御を挟まない）。
+    if (afterLayer) {
+      try {
+        layer.moveAfter(afterLayer);
+      } catch (eMove) {}
+    }
     hideCtrlLayer(layer, name);
     return layer;
   }
@@ -4011,6 +4009,7 @@
 
     beginUndo("EmoLabMaker: PSDセットアップ");
     try {
+      var prevCtrlNull = null; // この実行で直前に作った制御ヌル（作成順を保つ）
       for (var g = 0; g < groups.length; g++) {
         var group = groups[g];
         var comp = group.comp;
@@ -4096,7 +4095,8 @@
         }
         report.groupCount++;
 
-        createCtrlLayer(ctrlComp, comp.name);
+        // 同一実行で作る制御ヌルは作成順に並べる（最上位配置は維持）
+        prevCtrlNull = createCtrlLayer(ctrlComp, comp.name, prevCtrlNull);
 
         // 排他（*）＋任意指定（無印）＋ペア反転を同じ式で登録
         var toRegister = [];
