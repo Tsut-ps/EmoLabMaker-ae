@@ -2251,14 +2251,18 @@
    * 音素レイヤー探索 + 現在音素取得のロジック部分。
    * 名前マッチ式（従来）とマッピング式で共有する。
    */
-  function buildPhonemeSnippet(targetCompName) {
+  function buildPhonemeSnippet(targetCompName, labTag) {
+    var tag = labTag || "";
     return [
       'var targetComp = comp("' + escapeExprStr(targetCompName) + '");',
+      'var labTag = "' + escapeExprStr(tag) + '";',
       "",
       "function findPhonemeLayer() {",
       "  for (var i = 1; i <= targetComp.numLayers; i++) {",
       "    var layer = targetComp.layer(i);",
       '    if (layer.name.indexOf("[Lab] ") !== 0) continue;',
+      // labTag があれば、その文字列を名前に含む [Lab] だけを対象にする（立ち絵ごとの口パク振り分け #B）
+      '    if (labTag !== "" && layer.name.indexOf(labTag) < 0) continue;',
       "    if (layer.marker.numKeys === 0) continue;",
       "    if (time < layer.inPoint || time >= layer.outPoint) continue;",
       "    return layer;",
@@ -2305,7 +2309,8 @@
     myCsv,
     allCsv,
     isClosedFallback,
-    emoCtx
+    emoCtx,
+    labTag
   ) {
     var lines = ["// " + LAB_MAP_SIGNATURE];
     if (emoCtx) lines.push("// " + EXPR_SIGNATURE);
@@ -2316,7 +2321,7 @@
         'var allPhonemes = ",' + escapeExprStr(allCsv) + ',";',
         "var isClosedFallback = " + (isClosedFallback ? "true" : "false") + ";",
       ])
-      .concat(buildPhonemeSnippet(phonemeCompName))
+      .concat(buildPhonemeSnippet(phonemeCompName, labTag))
       .concat([
         "",
         "var phonemeLayer = findPhonemeLayer();",
@@ -2557,7 +2562,7 @@
    * emoCtx があれば非発話中は表情のラジオ選択にフォールバックする合成式になる。
    * 戻り値: { applied, emoLinked, stale }
    */
-  function applyMappingToLayers(items, phonemeCompName, allCsv) {
+  function applyMappingToLayers(items, phonemeCompName, allCsv, labTag) {
     var applied = 0;
     var emoLinked = 0;
     var stale = 0;
@@ -2571,7 +2576,8 @@
           it.myCsv,
           allCsv,
           it.isClosedFallback,
-          emoCtx
+          emoCtx,
+          labTag
         );
         it.layer.enabled = true;
       } catch (e) {
@@ -2598,9 +2604,21 @@
   var mouthMapHint = mouthMapPanel.add(
     "statictext",
     undefined,
-    "口コンポでレイヤーを選択して各行の「割当」→「適用」。行は追加・削除でき、ラベルも自由"
+    "選択→各行「割当」→「適用」。音素⇔口形は「現在を取込」→編集→「適用」で lab を再配置せず後から変更できます",
+    { multiline: true }
   );
   mouthMapHint.alignment = ["fill", "top"];
+
+  // 口パクタグ: 立ち絵が複数あるとき、対象の [Lab] を名前で振り分ける(#B)
+  var mouthTagRow = mouthMapPanel.add("group");
+  mouthTagRow.orientation = "row";
+  mouthTagRow.alignChildren = ["left", "center"];
+  mouthTagRow.spacing = 4;
+  mouthTagRow.add("statictext", undefined, "口パクタグ:");
+  var mouthLabTagInput = mouthTagRow.add("edittext", undefined, "");
+  mouthLabTagInput.preferredSize = [140, BUTTON_HEIGHT];
+  mouthLabTagInput.helpTip =
+    "立ち絵が複数あるとき、この文字列を名前に含む [Lab] レイヤーだけに反応させます（空=最初の [Lab]）。例: lab ファイル名の prefix（zunda_ 等）";
 
   // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
   // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)
@@ -2969,7 +2987,10 @@
       csv = m2[1];
     }
     var closed = /var\s+isClosedFallback\s*=\s*true/.test(expr);
-    return { myCsv: csv, isClosedFallback: closed };
+    var tag = "";
+    var mt = expr.match(/var\s+labTag\s*=\s*"([^"]*)"/);
+    if (mt) tag = mt[1];
+    return { myCsv: csv, isClosedFallback: closed, labTag: tag };
   }
 
   // 現在のコンポの口パク設定済みレイヤーを読み取り、各行に取り込む(#K)
@@ -2982,6 +3003,7 @@
     // (csv|closed) ごとにレイヤーをまとめる
     var groups = [];
     var index = {};
+    var importedTag = "";
     for (var i = 1; i <= comp.numLayers; i++) {
       var layer = comp.layer(i);
       var expr = "";
@@ -2992,6 +3014,7 @@
       }
       var parsed = parseLabMapExpression(expr);
       if (!parsed) continue;
+      if (!importedTag && parsed.labTag) importedTag = parsed.labTag;
       var keyTokens = normalizeCsvTokens(parsed.myCsv).join(",");
       var key = (parsed.isClosedFallback ? "C|" : "O|") + keyTokens;
       if (index[key] === undefined) {
@@ -3015,6 +3038,7 @@
     // 取り込み: まず既定行へ、CSV/閉じが一致する行があればそこへ。
     // 一致が無ければ新規行を追加する。既存の割当は上書きする。
     resetMouthRowsToDefault();
+    mouthLabTagInput.text = importedTag; // 口パクタグも復元(#B/#K)
     for (var g = 0; g < groups.length; g++) {
       var grp = groups[g];
       var grpTokens = normalizeCsvTokens(grp.myCsv).join(",");
@@ -3135,7 +3159,12 @@
     var result;
     beginUndo("lab2layer: 口形状マッピング適用");
     try {
-      result = applyMappingToLayers(items, phonemeCompName, allCsv);
+      result = applyMappingToLayers(
+        items,
+        phonemeCompName,
+        allCsv,
+        mouthLabTagInput.text.replace(/^\s+|\s+$/g, "")
+      );
     } finally {
       endUndo();
     }
