@@ -3838,9 +3838,9 @@
           if (!info.defaultLayer && layer.enabled) info.defaultLayer = layer;
         } else if (parsed.forced) {
           info.forcedLayers.push(layer);
-        } else if (!isFolder) {
-          // プレフィックスなしリーフ = 任意指定（独立 ON/OFF）。
-          // 無印フォルダはコンテナ扱いで選択肢にしない
+        } else {
+          // プレフィックスなし = 任意指定（独立 ON/OFF）。リーフでもフォルダでも
+          // 登録対象にする（フォルダは丸ごと表示/非表示できるチェックボックスになる）。
           info.optionalLayers.push({ layer: layer, parsed: parsed });
         }
 
@@ -5259,12 +5259,11 @@
           // * はリーフでもフォルダでも radio choice（フォルダは下のサブ階層切替も兼ねる）
           radio.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
         } else if (parsed.forced) {
-          // ! 強制表示。リーフのみ情報として出す（グレーアウト）。フォルダはコンテナ
-          if (!isFolder) {
-            forced.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
-          }
-        } else if (!isFolder) {
-          // 無印リーフ = 任意指定。無印/! フォルダは choice にしない
+          // ! 強制表示。リーフでもフォルダでも情報として出す（常時表示・グレーアウト）
+          forced.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
+        } else {
+          // 無印 = 任意指定（独立 ON/OFF）。リーフでもフォルダでも checkbox にする
+          // （フォルダはサブ階層を持ちつつ、自身も丸ごと表示/非表示できる）
           optional.push({ fullName: layer.name, label: parsed.base, layer: layer, flips: [] });
         }
 
