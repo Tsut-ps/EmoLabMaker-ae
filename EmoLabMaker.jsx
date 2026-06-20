@@ -5200,18 +5200,52 @@
     );
   }
 
+  // マーカー(* / !)の位置。先頭、または "_" の直後だけを正規のマーカーとみなす
+  // （basename 内の "母_お" 等の "_" を誤検出しないため）。無ければ -1。
+  function markerPosOf(name) {
+    for (var k = 0; k < name.length; k++) {
+      var ch = name.charAt(k);
+      if ((ch === "*" || ch === "!") && (k === 0 || name.charAt(k - 1) === "_")) {
+        return k;
+      }
+    }
+    return -1;
+  }
+
+  // コンポ内レイヤー名の「キャラ prefix（<root>_ 等）」を、ルート選択に依存せず
+  // コンポ自身のレイヤー名から検出する。これにより、立ち絵を外側コンポに入れて
+  // そちらをルートに選んでも */! やラベルが正しく出る（#外側ルート対応）。
+  //   1) マーカー付きレイヤーがあれば、その * / ! の直前までを prefix とする
+  //   2) 無ければ共通 prefix（多数決）
+  function detectCompPrefix(comp) {
+    var i;
+    for (i = 1; i <= comp.numLayers; i++) {
+      var nm = comp.layer(i).name;
+      if (isSystemLayerName(nm)) continue;
+      var mp = markerPosOf(nm);
+      if (mp > 0) return nm.substring(0, mp); // "_" の直後にマーカー → 直前までが prefix
+    }
+    var names = [];
+    for (i = 1; i <= comp.numLayers; i++) {
+      var n2 = comp.layer(i).name;
+      if (!isSystemLayerName(n2)) names.push(n2);
+    }
+    return detectDominantPrefix(names);
+  }
+
   function buildStageNodes(rootComp) {
     var visited = {};
     if (!rootComp) return [];
-    // uniquify が付けたルート名prefix（"<root>_"）を剥がしてから */! を判定する。
-    // 親コンポ参照レイヤーは uniquify 後のソース名（例 "zunda_s_*閉じ"）に追従するため、
-    // prefix を剥がさないと先頭の * を検出できない。
     var stageRootPrefix = rootComp.name + "_";
-    function parseMarkerName(name) {
-      var n =
-        name.indexOf(stageRootPrefix) === 0
-          ? name.substring(stageRootPrefix.length)
-          : name;
+    // コンポごとに検出した prefix を優先し、無ければルート名prefix を剥がしてから
+    // */! を判定する。これで外側コンポをルートに選んでも種別・ラベルが正しく出る。
+    function parseMarkerName(name, compPrefix) {
+      var n = name;
+      if (compPrefix && name.indexOf(compPrefix) === 0) {
+        n = name.substring(compPrefix.length);
+      } else if (name.indexOf(stageRootPrefix) === 0) {
+        n = name.substring(stageRootPrefix.length);
+      }
       return parsePsdLayerName(n);
     }
 
@@ -5226,6 +5260,7 @@
       var nodeCtrlName = null;
       var children = [];
       var childDepth = isRoot ? depth : depth + 1;
+      var compPrefix = detectCompPrefix(comp);
 
       for (var i = 1; i <= comp.numLayers; i++) {
         var layer = comp.layer(i);
@@ -5237,7 +5272,7 @@
         } catch (eNull) {}
         if (isNull) continue;
 
-        var parsed = parseMarkerName(layer.name);
+        var parsed = parseMarkerName(layer.name, compPrefix);
 
         var src = null;
         try {
@@ -5276,7 +5311,8 @@
           // * フォルダで中身に * が無い = 1ポーズを包むラッパー。フォルダ自体を
           // 親のラジオ選択肢に集約済みなので、冗長なサブノードは出さない。
           var isPoseWrapper =
-            parsed.exclusive && !compHasExclusiveLayer(src, stageRootPrefix);
+            parsed.exclusive &&
+            !compHasExclusiveLayer(src, detectCompPrefix(src));
           if (!isPoseWrapper) {
             children = children.concat(
               walk(src, childDepth, false, {
