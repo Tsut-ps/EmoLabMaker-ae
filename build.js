@@ -4,7 +4,7 @@
  *
  * After Effects は単一の .jsx しか読めず、本体は1つの IIFE クロージャ内で
  * 共有変数(win/tabs/各UIウィジェット)を参照し合う構造のため、ES module 分割は
- * できない。そこで src/*.jsxinc を「決められた順」に**そのまま連結**して
+ * できない。そこで src/*.jsx を「決められた順」に**そのまま連結**して
  * dist/EmoLabMaker.jsx を生成する（連結＝同一クロージャが保たれる）。
  *
  * 重要:
@@ -12,7 +12,7 @@
  *     配布は GitHub Releases に添付する（.github/workflows/release.yml）。
  *   - 編集は src/ 側で行い、`node build.js` で再生成する。
  *   - IIFE のラッパー (function(){ … })(this) は本スクリプトが付ける。よって
- *     src/*.jsxinc は全て括弧が閉じた断片で、単体でも `node --check` が通る。
+ *     src/*.jsx は全て括弧が閉じた断片で、単体でも `node --check` が通る。
  *     ただし共有変数(win/tabs 等)は連結後に同一クロージャへ入る前提なので、
  *     エディタの「変数未定義」警告は出る（構文エラーではない）。
  *   - 連結順は実行順: 00_header(IIFEの外) → [05_open=定数/win・tabs生成 →
@@ -26,20 +26,20 @@ var OUT_DIR = path.join(__dirname, "dist");
 var OUT_FILE = path.join(OUT_DIR, "EmoLabMaker.jsx");
 
 // IIFE のラッパー（(function(){ … })(this)）は build.js 側で付ける。
-// こうすると src/*.jsxinc は全て括弧が閉じた断片になり、単体でも `node --check` が
+// こうすると src/*.jsx は全て括弧が閉じた断片になり、単体でも `node --check` が
 // 通る（00 が開き 99 が閉じる、で構文エラーになる問題を解消）。
 //
 // 構成:
 //   HEADER … IIFE の外（ファイル冒頭のドキュメントコメント）
 //   IIFE_OPEN + BODY(各断片) + IIFE_CLOSE … 共有クロージャ本体
-var HEADER = ["00_header.jsxinc"];
+var HEADER = ["00_header.jsx"];
 var BODY = [
-  "05_open.jsxinc",
-  "10_core.jsxinc",
-  "20_tab_lab.jsxinc",
-  "30_tab_psd.jsxinc",
-  "40_tab_stage.jsxinc",
-  "99_close.jsxinc"
+  "05_open.jsx",
+  "10_core.jsx",
+  "20_tab_lab.jsx",
+  "30_tab_psd.jsx",
+  "40_tab_stage.jsx",
+  "99_close.jsx"
 ];
 var IIFE_OPEN = Buffer.from("(function emoLabMaker(thisObj) {\n");
 var IIFE_CLOSE = Buffer.from("})(this);\n");
