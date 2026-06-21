@@ -16,7 +16,7 @@
  *     ただし共有変数(win/tabs 等)は連結後に同一クロージャへ入る前提なので、
  *     エディタの「変数未定義」警告は出る（構文エラーではない）。
  *   - 連結順は実行順: 00_header(IIFEの外) → [05_open=定数/win・tabs生成 →
- *     10=共通基盤 → 20/30/40=各タブ → 99=リサイズ/init] → IIFE終了。
+ *     core/*・ui/*=共通基盤 → 20/30/40=各タブ → 99=リサイズ/init] → IIFE終了。
  */
 var fs = require("fs");
 var path = require("path");
@@ -35,7 +35,14 @@ var OUT_FILE = path.join(OUT_DIR, "EmoLabMaker.jsx");
 var HEADER = ["00_header.jsx"];
 var BODY = [
   "05_open.jsx",
-  "10_core.jsx",
+  // 共通基盤（旧 10_core.jsx を意味単位に分割。すべて関数宣言/定数で順序自由）
+  "core/layers.jsx",
+  "core/expressions.jsx",
+  "core/markers.jsx",
+  "core/emoset.jsx",
+  "ui/scriptui.jsx",
+  "ui/dialogs.jsx",
+  // 各タブ（UI 構築＋ハンドラ。即時実行なので実行順を保つ）
   "20_tab_lab.jsx",
   "30_tab_psd.jsx",
   "40_tab_stage.jsx",
