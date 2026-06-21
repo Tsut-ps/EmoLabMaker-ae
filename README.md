@@ -38,20 +38,15 @@
 > [!NOTE]
 > mac 環境での動作チェックはしていないので動かなかったら改変してください
 
-## 開発（ソース分割とビルド）
+## 開発・ビルド
 
-本体ソースは保守性のため `src/*.jsxinc` に分割しています。After Effects は単一の
-`.jsx` しか読めないため、`build.js` がこれらを連結して 1 枚の `.jsx` を生成します。
+本体ソースは保守性のため `src/`（`core/` `ui/` `tabs/`）に分割し、`build.js` で
+1 枚の `dist/EmoLabMaker.jsx` に連結して配布します。ディレクトリ構成・ビルド・
+リリース手順は **[DEVELOPMENT.md](DEVELOPMENT.md)** を参照してください。
 
 ```sh
-node build.js   # src/*.jsxinc -> dist/EmoLabMaker.jsx を生成
+node build.js   # src/*.jsx -> dist/EmoLabMaker.jsx を生成
 ```
-
-- **編集は `src/` 側**で行い、`node build.js` で再生成してください
-  （`dist/EmoLabMaker.jsx` は生成物・`.gitignore` 対象でコミットしません）
-- **配布**: `v*` タグを push すると GitHub Actions（`.github/workflows/release.yml`）が
-  ビルドして Release に `EmoLabMaker.jsx` を添付します。手動実行（Actions タブ →
-  Release → Run workflow）でもタグ指定でリリースできます
 
 
 # 表情切替の仕組み（emo2layer の共通基盤）
