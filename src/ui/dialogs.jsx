@@ -122,3 +122,152 @@ function pickMouthLayerDialog(rowLabel, candidateLayers) {
   dlg.show();
   return result.chosen;
 }
+
+// ── PSD 関連のダイアログ（30_tab_psd.jsx から抽出） ──
+
+/**
+ * 走査結果の確認ダイアログ。
+ * セットアップするグループを選ばせる（誤検出の確認画面を兼ねる）。
+ * OK なら選択されたグループ配列、キャンセルなら null を返す
+ */
+function showPsdScanDialog(rootComp, groups) {
+  var dialog = new Window("dialog", "PSD 解析結果 - " + rootComp.name);
+  dialog.orientation = "column";
+  dialog.alignChildren = ["fill", "top"];
+  dialog.margins = 16;
+  dialog.spacing = 6;
+
+  dialog.add(
+    "statictext",
+    undefined,
+    "セットアップするグループを選択してください:",
+  );
+
+  var listGroup = dialog.add("group");
+  listGroup.orientation = "column";
+  listGroup.alignChildren = ["fill", "top"];
+  listGroup.spacing = 2;
+
+  var checkboxes = [];
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i];
+    var defaultLayer = group.defaultLayer;
+    var label =
+      group.comp.name +
+      "（排他 " +
+      group.exclusiveLayers.length +
+      " / 任意 " +
+      group.optionalLayers.length +
+      " / 強制 " +
+      group.forcedLayers.length +
+      (group.flipVariants.length > 0
+        ? " / 反転 " + group.flipVariants.length
+        : "") +
+      (defaultLayer
+        ? " / 既定: " + parsePsdLayerName(defaultLayer.name).base
+        : "") +
+      "）";
+    var cb = listGroup.add("checkbox", undefined, label);
+    // 排他または任意指定があるグループを既定で ON（強制のみのグループも選択は可能）
+    cb.value =
+      group.exclusiveLayers.length > 0 || group.optionalLayers.length > 0;
+    checkboxes.push(cb);
+  }
+
+  var noteText = dialog.add(
+    "statictext",
+    undefined,
+    "グループコンポは「" + rootComp.name + "_◯◯」に改名されます",
+  );
+  noteText.graphics.foregroundColor = noteText.graphics.newPen(
+    noteText.graphics.PenType.SOLID_COLOR,
+    [0.6, 0.6, 0.6, 1],
+    1,
+  );
+
+  var btnGroup = dialog.add("group");
+  btnGroup.alignment = ["right", "bottom"];
+  btnGroup.add("button", undefined, "セットアップ", { name: "ok" });
+  btnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
+
+  if (dialog.show() !== 1) return null;
+
+  var selected = [];
+  for (var j = 0; j < groups.length; j++) {
+    if (checkboxes[j].value) selected.push(groups[j]);
+  }
+  return selected;
+}
+
+/** セットアップ結果のレポートダイアログ */
+function showPsdReportDialog(report) {
+  var dialog = new Window("dialog", "PSD セットアップ結果");
+  dialog.orientation = "column";
+  dialog.alignChildren = ["fill", "top"];
+  dialog.margins = 16;
+  dialog.spacing = 6;
+
+  var summaryLines = [
+    "グループ: " + report.groupCount,
+    "新規登録: " + report.registered + " レイヤー",
+    "更新: " + report.updated + " レイヤー",
+  ];
+  if (report.kept > 0) {
+    summaryLines.push(
+      "保持（口パク/目パチ設定済み）: " + report.kept + " レイヤー",
+    );
+  }
+  if (report.forced > 0) {
+    summaryLines.push("強制表示 (!): " + report.forced + " レイヤー");
+  }
+  if (report.flipPaired > 0) {
+    summaryLines.push(
+      "反転ペア登録 (:flipx 等): " + report.flipPaired + " レイヤー",
+    );
+  }
+  if (report.markersWritten > 0) {
+    summaryLines.push(
+      "デフォルト表情マーカー: " + report.markersWritten + " 件",
+    );
+  }
+  for (var i = 0; i < summaryLines.length; i++) {
+    dialog.add("statictext", undefined, summaryLines[i]);
+  }
+
+  var detailLines = [];
+  if (report.renamedComps.length > 0) {
+    detailLines.push("【コンポ名の一意化】");
+    detailLines = detailLines.concat(report.renamedComps);
+    detailLines.push("");
+  }
+  if (report.renamedLayers.length > 0) {
+    detailLines.push("【レイヤーのリネーム】");
+    detailLines = detailLines.concat(report.renamedLayers);
+    detailLines.push("");
+  }
+  if (report.flipVariants.length > 0) {
+    detailLines.push(
+      "【反転バリエーション (:flipx/:flipy)】ペアは登録、ペアなしはスキップ",
+    );
+    detailLines = detailLines.concat(report.flipVariants);
+    detailLines.push("");
+  }
+  if (report.commaNames.length > 0) {
+    detailLines.push(
+      "【警告: レイヤー名にカンマ「,」】表示中集合が壊れる恐れ。リネーム推奨",
+    );
+    detailLines = detailLines.concat(report.commaNames);
+  }
+
+  if (detailLines.length > 0) {
+    var detailBox = dialog.add("edittext", undefined, detailLines.join("\n"), {
+      multiline: true,
+      scrolling: true,
+      readonly: true,
+    });
+    detailBox.preferredSize = [380, 160];
+  }
+
+  dialog.add("button", undefined, "閉じる", { name: "ok" });
+  dialog.show();
+}

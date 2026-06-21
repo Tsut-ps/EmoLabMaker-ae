@@ -41,6 +41,8 @@ var BODY = [
   "core/markers.jsx",
   "core/emoset.jsx",
   "core/lab.jsx",
+  "core/psd.jsx",
+  "core/blink.jsx",
   "ui/scriptui.jsx",
   "ui/dialogs.jsx",
   // 各タブ（UI 構築＋ハンドラ。即時実行なので実行順を保つ）
