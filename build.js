@@ -5,12 +5,14 @@
  * After Effects は単一の .jsx しか読めず、本体は1つの IIFE クロージャ内で
  * 共有変数(win/tabs/各UIウィジェット)を参照し合う構造のため、ES module 分割は
  * できない。そこで src/*.jsxinc を「決められた順」に**そのまま連結**して
- * 1枚の EmoLabMaker.jsx を生成する（連結＝同一クロージャが保たれる）。
+ * dist/EmoLabMaker.jsx を生成する（連結＝同一クロージャが保たれる）。
  *
  * 重要:
- *   - ルートの EmoLabMaker.jsx は**生成物**。編集は src/ 側で行い、`node build.js`。
+ *   - 生成物は dist/EmoLabMaker.jsx（**gitignore 対象・コミットしない**）。
+ *     配布は GitHub Releases に添付する（.github/workflows/release.yml）。
+ *   - 編集は src/ 側で行い、`node build.js` で再生成する。
  *   - 各 .jsxinc は単体では不完全な断片（00 が IIFE を開き 99 が閉じる）。
- *     構文チェック/テストは生成後の EmoLabMaker.jsx に対して行う。
+ *     構文チェック/テストは生成後の dist/EmoLabMaker.jsx に対して行う。
  *   - 連結順は実行順: 00=IIFE開始/定数/win・tabs生成 → 10=共通基盤 →
  *     20/30/40=各タブ → 99=リサイズ/init/IIFE終了。
  */
@@ -18,7 +20,8 @@ var fs = require("fs");
 var path = require("path");
 
 var SRC_DIR = path.join(__dirname, "src");
-var OUT_FILE = path.join(__dirname, "EmoLabMaker.jsx");
+var OUT_DIR = path.join(__dirname, "dist");
+var OUT_FILE = path.join(OUT_DIR, "EmoLabMaker.jsx");
 
 // 連結順（明示マニフェスト。番号順ソート任せにせず、ここで順序を一元管理する）
 var ORDER = [
@@ -41,10 +44,13 @@ for (var i = 0; i < ORDER.length; i++) {
 }
 
 var out = Buffer.concat(buffers);
+if (!fs.existsSync(OUT_DIR)) {
+  fs.mkdirSync(OUT_DIR, { recursive: true });
+}
 fs.writeFileSync(OUT_FILE, out);
 
 var lineCount = out.toString("utf8").split("\n").length;
 console.log(
-  "Built " + path.basename(OUT_FILE) + " from " + ORDER.length +
+  "Built dist/" + path.basename(OUT_FILE) + " from " + ORDER.length +
   " parts (" + lineCount + " lines, " + out.length + " bytes)."
 );

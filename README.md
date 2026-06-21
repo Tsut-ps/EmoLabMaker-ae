@@ -28,7 +28,7 @@
 
 ## インストール方法
 
-1. `EmoLabMaker.jsx` をダウンロード
+1. [**Releases**](../../releases/latest) から `EmoLabMaker.jsx` をダウンロード
 2. 以下のいずれかの場所に配置:
    - **Windows**: `C:\Program Files\Adobe\Adobe After Effects <version>\Support Files\Scripts\ScriptUI Panels\`
    - **macOS**: `/Applications/Adobe After Effects <version>/Scripts/ScriptUI Panels/`
@@ -37,6 +37,21 @@
 
 > [!NOTE]
 > mac 環境での動作チェックはしていないので動かなかったら改変してください
+
+## 開発（ソース分割とビルド）
+
+本体ソースは保守性のため `src/*.jsxinc` に分割しています。After Effects は単一の
+`.jsx` しか読めないため、`build.js` がこれらを連結して 1 枚の `.jsx` を生成します。
+
+```sh
+node build.js   # src/*.jsxinc -> dist/EmoLabMaker.jsx を生成
+```
+
+- **編集は `src/` 側**で行い、`node build.js` で再生成してください
+  （`dist/EmoLabMaker.jsx` は生成物・`.gitignore` 対象でコミットしません）
+- **配布**: `v*` タグを push すると GitHub Actions（`.github/workflows/release.yml`）が
+  ビルドして Release に `EmoLabMaker.jsx` を添付します。手動実行（Actions タブ →
+  Release → Run workflow）でもタグ指定でリリースできます
 
 
 # 表情切替の仕組み（emo2layer の共通基盤）
