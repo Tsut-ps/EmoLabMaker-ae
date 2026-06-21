@@ -11,10 +11,12 @@
  *   - 生成物は dist/EmoLabMaker.jsx（**gitignore 対象・コミットしない**）。
  *     配布は GitHub Releases に添付する（.github/workflows/release.yml）。
  *   - 編集は src/ 側で行い、`node build.js` で再生成する。
- *   - 各 .jsxinc は単体では不完全な断片（00 が IIFE を開き 99 が閉じる）。
- *     構文チェック/テストは生成後の dist/EmoLabMaker.jsx に対して行う。
- *   - 連結順は実行順: 00=IIFE開始/定数/win・tabs生成 → 10=共通基盤 →
- *     20/30/40=各タブ → 99=リサイズ/init/IIFE終了。
+ *   - IIFE のラッパー (function(){ … })(this) は本スクリプトが付ける。よって
+ *     src/*.jsxinc は全て括弧が閉じた断片で、単体でも `node --check` が通る。
+ *     ただし共有変数(win/tabs 等)は連結後に同一クロージャへ入る前提なので、
+ *     エディタの「変数未定義」警告は出る（構文エラーではない）。
+ *   - 連結順は実行順: 00_header(IIFEの外) → [05_open=定数/win・tabs生成 →
+ *     10=共通基盤 → 20/30/40=各タブ → 99=リサイズ/init] → IIFE終了。
  */
 var fs = require("fs");
 var path = require("path");
@@ -23,34 +25,52 @@ var SRC_DIR = path.join(__dirname, "src");
 var OUT_DIR = path.join(__dirname, "dist");
 var OUT_FILE = path.join(OUT_DIR, "EmoLabMaker.jsx");
 
-// 連結順（明示マニフェスト。番号順ソート任せにせず、ここで順序を一元管理する）
-var ORDER = [
-  "00_open.jsxinc",
+// IIFE のラッパー（(function(){ … })(this)）は build.js 側で付ける。
+// こうすると src/*.jsxinc は全て括弧が閉じた断片になり、単体でも `node --check` が
+// 通る（00 が開き 99 が閉じる、で構文エラーになる問題を解消）。
+//
+// 構成:
+//   HEADER … IIFE の外（ファイル冒頭のドキュメントコメント）
+//   IIFE_OPEN + BODY(各断片) + IIFE_CLOSE … 共有クロージャ本体
+var HEADER = ["00_header.jsxinc"];
+var BODY = [
+  "05_open.jsxinc",
   "10_core.jsxinc",
   "20_tab_lab.jsxinc",
   "30_tab_psd.jsxinc",
   "40_tab_stage.jsxinc",
   "99_close.jsxinc"
 ];
+var IIFE_OPEN = Buffer.from("(function emoLabMaker(thisObj) {\n");
+var IIFE_CLOSE = Buffer.from("})(this);\n");
 
-var buffers = [];
-for (var i = 0; i < ORDER.length; i++) {
-  var p = path.join(SRC_DIR, ORDER[i]);
-  if (!fs.existsSync(p)) {
-    console.error("ERROR: 部品が見つかりません: " + p);
-    process.exit(1);
+function readParts(names) {
+  var bufs = [];
+  for (var i = 0; i < names.length; i++) {
+    var p = path.join(SRC_DIR, names[i]);
+    if (!fs.existsSync(p)) {
+      console.error("ERROR: 部品が見つかりません: " + p);
+      process.exit(1);
+    }
+    bufs.push(fs.readFileSync(p)); // バイト連結（エンコード変換しない）
   }
-  buffers.push(fs.readFileSync(p)); // バイト連結（エンコード変換しない）
+  return Buffer.concat(bufs);
 }
 
-var out = Buffer.concat(buffers);
+var out = Buffer.concat([
+  readParts(HEADER),
+  IIFE_OPEN,
+  readParts(BODY),
+  IIFE_CLOSE
+]);
 if (!fs.existsSync(OUT_DIR)) {
   fs.mkdirSync(OUT_DIR, { recursive: true });
 }
 fs.writeFileSync(OUT_FILE, out);
 
 var lineCount = out.toString("utf8").split("\n").length;
+var partCount = HEADER.length + BODY.length;
 console.log(
-  "Built dist/" + path.basename(OUT_FILE) + " from " + ORDER.length +
+  "Built dist/" + path.basename(OUT_FILE) + " from " + partCount +
   " parts (" + lineCount + " lines, " + out.length + " bytes)."
 );

@@ -59,4 +59,3 @@
     refreshStage(false);
     refreshMouthScroll();
   } catch (eInit) {}
-})(this);
