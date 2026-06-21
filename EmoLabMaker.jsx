@@ -2634,7 +2634,8 @@
   var mouthRowsClip = mouthMapPanel.add("panel");
   mouthRowsClip.alignment = ["fill", "fill"];
   mouthRowsClip.margins = 2;
-  mouthRowsClip.preferredSize = [-1, 168];
+  mouthRowsClip.minimumSize = [60, 120];
+  mouthRowsClip.preferredSize.height = 168;
 
   var mouthRowsGroup = mouthRowsClip.add("group");
   mouthRowsGroup.orientation = "column";
@@ -2651,8 +2652,9 @@
   function applyMouthScroll(value) {
     try {
       var m = 2;
-      var pw = mouthRowsClip.size ? mouthRowsClip.size.width : 360;
-      var ph = mouthRowsClip.size ? mouthRowsClip.size.height : 168;
+      var psz = panelActualSize(mouthRowsClip, 360, 168);
+      var pw = psz[0];
+      var ph = psz[1];
       var sbW = 14;
       var innerH = ph - m * 2;
       // size ではなく preferredSize（本来のコンテンツ高さ）で測る（スクロールバーが
@@ -6017,6 +6019,28 @@
     }
   }
 
+  // パネルの実寸を返す。リサイズ直後は size が古いことがあるため bounds を優先。
+  function panelActualSize(p, defW, defH) {
+    var w = 0;
+    var h = 0;
+    try {
+      if (p.bounds) {
+        w = p.bounds.width;
+        h = p.bounds.height;
+      }
+    } catch (eB) {}
+    if (!w || !h) {
+      try {
+        if (p.size) {
+          w = p.size.width;
+          h = p.size.height;
+        }
+      } catch (eS) {}
+    }
+    if (!w) w = defW;
+    if (!h) h = defH;
+    return [w, h];
+  }
   // 中身グループの「本来の高さ」を返す。preferredSize（コンテンツ由来）を優先し、
   // パネルに引き伸ばされた size に惑わされないようにする。
   function contentHeightOf(grp) {
@@ -6041,8 +6065,9 @@
   function applyStageScroll(value) {
     try {
       var m = getPanelMarginOf(stageGridPanel);
-      var pw = stageGridPanel.size ? stageGridPanel.size.width : 360;
-      var ph = stageGridPanel.size ? stageGridPanel.size.height : 200;
+      var psz = panelActualSize(stageGridPanel, 360, 200);
+      var pw = psz[0];
+      var ph = psz[1];
       var sbW = 14;
       var innerH = ph - m * 2;
       // 中身の高さは preferredSize（=コンテンツ本来の高さ）で測る。size はパネルに
