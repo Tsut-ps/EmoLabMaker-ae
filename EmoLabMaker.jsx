@@ -2655,12 +2655,20 @@
       var ph = mouthRowsClip.size ? mouthRowsClip.size.height : 168;
       var sbW = 14;
       var innerH = ph - m * 2;
-      var contentH = mouthRowsGroup.size ? mouthRowsGroup.size.height : 0;
+      // size ではなく preferredSize（本来のコンテンツ高さ）で測る（スクロールバーが
+      // 出ない/壊れる対策。詳細は contentHeightOf 参照）
+      var contentH = contentHeightOf(mouthRowsGroup);
       var maxv = contentH - innerH;
       if (maxv < 0) maxv = 0;
       if (value === undefined || value === null || value < 0) value = 0;
       if (value > maxv) value = maxv;
       mouthRowsScrollValue = value;
+      // 中身をコンテンツ高さに固定（引き伸ばされると下端が描画されない）
+      var innerW = pw - m * 2 - (maxv > 0 ? sbW : 0);
+      if (innerW < 20) innerW = 20;
+      try {
+        mouthRowsGroup.size = [innerW, contentH];
+      } catch (eSz) {}
       mouthRowsGroup.location = [m, m - value];
       mouthRowsScroll.location = [pw - sbW - m, m];
       mouthRowsScroll.size = [sbW, innerH];
@@ -5447,15 +5455,6 @@
   stageRefreshBtn.preferredSize = [52, BUTTON_HEIGHT];
   stageRefreshBtn.helpTip = "コンポ一覧・階層・現在状態を再取得（再生ヘッド移動後に押す）";
 
-  // スクロール用ボタン（AE の ScriptUI はマウスホイールを受け取れないため、
-  // クリックで確実にスクロールできる手段を用意する）
-  var stageScrollUpBtn = stageTopRow.add("button", undefined, "▲");
-  stageScrollUpBtn.preferredSize = [26, BUTTON_HEIGHT];
-  stageScrollUpBtn.helpTip = "ツリーを上にスクロール";
-  var stageScrollDownBtn = stageTopRow.add("button", undefined, "▼");
-  stageScrollDownBtn.preferredSize = [26, BUTTON_HEIGHT];
-  stageScrollDownBtn.helpTip = "ツリーを下にスクロール";
-
   var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
   stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
@@ -5633,19 +5632,6 @@
     if (v > stageScroll.maxvalue) v = stageScroll.maxvalue;
     applyStageScroll(v);
   }
-  // 1 クリックで「ほぼ 1 画面分」スクロールする（dir: -1=上 / +1=下）
-  function scrollStagePage(dir) {
-    var ph = stageGridPanel.size ? stageGridPanel.size.height : 200;
-    var page = (ph - 20) * 0.85;
-    if (page < 40) page = 40;
-    scrollStageBy(dir * page);
-  }
-  stageScrollUpBtn.onClick = function () {
-    scrollStagePage(-1);
-  };
-  stageScrollDownBtn.onClick = function () {
-    scrollStagePage(1);
-  };
   function attachStageWheel(ctrl) {
     try {
       ctrl.addEventListener("mousewheel", function (ev) {
@@ -6031,6 +6017,26 @@
     }
   }
 
+  // 中身グループの「本来の高さ」を返す。preferredSize（コンテンツ由来）を優先し、
+  // パネルに引き伸ばされた size に惑わされないようにする。
+  function contentHeightOf(grp) {
+    var h = 0;
+    try {
+      if (grp.preferredSize && grp.preferredSize.height) {
+        h = grp.preferredSize.height;
+      }
+    } catch (e) {}
+    if (!h) {
+      try {
+        h = grp.size ? grp.size.height : 0;
+      } catch (e2) {}
+    }
+    return h;
+  }
+  function stageGridContentHeight() {
+    return contentHeightOf(stageGrid);
+  }
+
   // ツリーのスクロール: 中身(stageGrid)を上下に動かし、パネルでクリップする。
   function applyStageScroll(value) {
     try {
@@ -6039,7 +6045,10 @@
       var ph = stageGridPanel.size ? stageGridPanel.size.height : 200;
       var sbW = 14;
       var innerH = ph - m * 2;
-      var contentH = stageGrid.size ? stageGrid.size.height : 0;
+      // 中身の高さは preferredSize（=コンテンツ本来の高さ）で測る。size はパネルに
+      // 引き伸ばされて実際のコンテンツ量と一致しないことがあり、スクロールバーが
+      // 出ない/壊れる原因になる（ウィンドウ高さ変更時に顕著）。
+      var contentH = stageGridContentHeight();
       var maxv = contentH - innerH;
       if (maxv < 0) maxv = 0;
       if (value === undefined || value === null || value < 0) value = 0;
@@ -6053,6 +6062,13 @@
       stageScroll.value = value;
       stageScroll.visible = maxv > 0;
 
+      // 中身をコンテンツ高さに固定する（パネルに引き伸ばされると下端が描画されず、
+      // スクロールしても見えない＝壊れて見える）。幅はスクロールバー分を確保。
+      var innerW = pw - m * 2 - (maxv > 0 ? sbW : 0);
+      if (innerW < 20) innerW = 20;
+      try {
+        stageGrid.size = [innerW, contentH];
+      } catch (eSz) {}
       stageGrid.location = [m, m - value];
     } catch (e) {}
   }
