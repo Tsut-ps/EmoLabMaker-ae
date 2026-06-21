@@ -2606,7 +2606,7 @@
   );
   mouthMapPanel.orientation = "column";
   mouthMapPanel.alignChildren = ["fill", "top"];
-  mouthMapPanel.alignment = ["fill", "fill"];
+  mouthMapPanel.alignment = ["fill", "top"];
   mouthMapPanel.spacing = 4;
   mouthMapPanel.margins = 10;
 
@@ -2631,11 +2631,12 @@
 
   // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
   // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)
+  var MOUTH_SCROLL_H = 200; // 口パクの口形マッピングは固定高さ + スクロールバー
   var mouthRowsClip = mouthMapPanel.add("panel");
-  mouthRowsClip.alignment = ["fill", "fill"];
+  mouthRowsClip.alignment = ["fill", "top"];
   mouthRowsClip.margins = 2;
-  mouthRowsClip.minimumSize = [60, 120];
-  mouthRowsClip.preferredSize.height = 168;
+  mouthRowsClip.minimumSize = [60, MOUTH_SCROLL_H];
+  mouthRowsClip.preferredSize.height = MOUTH_SCROLL_H;
 
   var mouthRowsGroup = mouthRowsClip.add("group");
   mouthRowsGroup.orientation = "column";
@@ -2652,9 +2653,10 @@
   function applyMouthScroll(value) {
     try {
       var m = 2;
-      var psz = panelActualSize(mouthRowsClip, 360, 168);
-      var pw = psz[0];
-      var ph = availHeightForPanel(mouthRowsClip, tabLab);
+      // 口パクは固定高さ + スクロールバー（リサイズで壊れないシンプル方式）。
+      // 幅だけウィンドウ由来で追従させ、スクロールバーが画面外へ消えないようにする。
+      var pw = availWidthForPanel(mouthRowsClip, tabLab);
+      var ph = MOUTH_SCROLL_H;
       try {
         mouthRowsClip.size = [pw, ph];
       } catch (ePh) {}
@@ -6109,14 +6111,42 @@
     return avail;
   }
 
+  // スクロールパネルが使える幅を「ウィンドウ幅 − 左右マージン」で算出する。
+  // パネル幅を直接読むとリサイズに追従せずスクロールバーが画面外へ消える
+  // （= 壊れて見える）ため、ウィンドウ幅から求める。横方向は段積みの兄弟が
+  // 無い前提（全幅パネル）なので、各階層のマージンだけ引く。
+  function availWidthForPanel(panel, topTab) {
+    var avail = 0;
+    try {
+      avail = win.size ? win.size.width : 0;
+    } catch (eW) {}
+    if (!avail) avail = 460;
+    try {
+      avail -= (win.margins.left || 0) + (win.margins.right || 0);
+    } catch (eM) {}
+    avail -= 6; // tabbedpanel の左右枠 概算
+    var node = panel;
+    var guard = 0;
+    while (node && node !== topTab && guard < 20) {
+      guard++;
+      var parent = node.parent;
+      if (!parent) break;
+      try {
+        avail -= (parent.margins.left || 0) + (parent.margins.right || 0);
+      } catch (eP) {}
+      node = parent;
+    }
+    if (avail < 60) avail = 60;
+    return avail;
+  }
+
   // ツリーのスクロール: 中身(stageGrid)を上下に動かし、パネルでクリップする。
   function applyStageScroll(value) {
     try {
       var m = getPanelMarginOf(stageGridPanel);
-      var psz = panelActualSize(stageGridPanel, 360, 200);
-      var pw = psz[0];
-      // 高さはウィンドウから他要素を引いて算出（パネルの size はリサイズに
-      // 追従しないため）。算出した高さをパネルにも反映してクリップ域を合わせる。
+      // 幅・高さともウィンドウから算出する（パネル自身の size を読んで設定すると
+      // フィードバックで値が壊れていくため、ウィンドウ由来の値だけを使う）。
+      var pw = availWidthForPanel(stageGridPanel, tabStage);
       var ph = availHeightForPanel(stageGridPanel, tabStage);
       try {
         stageGridPanel.size = [pw, ph];
