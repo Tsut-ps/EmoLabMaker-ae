@@ -6105,7 +6105,7 @@
         avail -= versionRow.size.height;
       }
     } catch (eV) {}
-    avail -= 16; // タブバー（tabbedpanel のタブ見出し）概算
+    avail -= 28; // タブバー（tabbedpanel のタブ見出し）+ 下要素との安全余白
     // panel から topTab まで遡り、各階層で「自分以外の兄弟＋spacing＋margins」を引く。
     // 非表示の兄弟はレイアウト上の場所を取らないので引かない（高さ不足の原因）。
     var node = panel;
