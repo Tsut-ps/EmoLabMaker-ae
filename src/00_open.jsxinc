@@ -1,6 +1,4 @@
-﻿// ⚠ このファイルは生成物です。直接編集しないでください。
-//   ソースは src/*.jsxinc にあり、`node build.js` で本ファイルを再生成します。
-/**
+﻿/**
  * EmoLabMaker.jsx
  * @version 2.0.3
  * @description セットアップ + 立ち絵 + 口パク + 目パチ 統合パネル（PSDToolKit互換）
