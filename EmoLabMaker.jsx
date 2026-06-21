@@ -6045,19 +6045,40 @@
     if (!h) h = defH;
     return [w, h];
   }
-  // 中身グループの「本来の高さ」を返す。preferredSize（コンテンツ由来）を優先し、
-  // パネルに引き伸ばされた size に惑わされないようにする。
+  // 中身グループの「本来の高さ」を返す。子要素の高さを合計して求める。
+  // size はパネルに引き伸ばされ、preferredSize は上限で頭打ちになることがあり、
+  // どちらも当てにならない。子の合計なら伸縮・頭打ちの影響を受けず正確。
   function contentHeightOf(grp) {
     var h = 0;
+    var n = 0;
     try {
-      if (grp.preferredSize && grp.preferredSize.height) {
-        h = grp.preferredSize.height;
+      var kids = grp.children;
+      for (var i = 0; i < kids.length; i++) {
+        var c = kids[i];
+        var vis = true;
+        try {
+          vis = c.visible !== false;
+        } catch (eV) {}
+        if (!vis) continue;
+        var ch = 0;
+        try {
+          ch = c.size ? c.size.height : 0;
+        } catch (eC) {}
+        h += ch;
+        n++;
       }
+      if (n > 1) h += (n - 1) * (grp.spacing || 0);
     } catch (e) {}
+    // フォールバック（子から測れない場合）
     if (!h) {
       try {
-        h = grp.size ? grp.size.height : 0;
+        h = grp.preferredSize ? grp.preferredSize.height : 0;
       } catch (e2) {}
+      if (!h) {
+        try {
+          h = grp.size ? grp.size.height : 0;
+        } catch (e3) {}
+      }
     }
     return h;
   }
@@ -6593,4 +6614,11 @@
   } else {
     win.layout.layout(true);
   }
+
+  // ウィンドウが実体化してサイズが確定してから、スクロール枠を測り直す
+  // （init 時点では win.size が未確定で、口パク枠などが初期表示で崩れるため）。
+  try {
+    refreshStage(false);
+    refreshMouthScroll();
+  } catch (eInit) {}
 })(this);
