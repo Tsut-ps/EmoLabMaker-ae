@@ -2606,7 +2606,7 @@
   );
   mouthMapPanel.orientation = "column";
   mouthMapPanel.alignChildren = ["fill", "top"];
-  mouthMapPanel.alignment = ["fill", "fill"];
+  mouthMapPanel.alignment = ["fill", "top"];
   mouthMapPanel.spacing = 4;
   mouthMapPanel.margins = 10;
 
@@ -2630,12 +2630,15 @@
     "立ち絵が複数あるとき、この文字列を名前に含む [Lab] レイヤーだけに反応させます（空=最初の [Lab]）。例: lab ファイル名の prefix（zunda_ 等）";
 
   // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
-  // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)
+  // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)。
+  // 口パクは固定高さ + スクロールバー（リサイズ・追加で壊れないシンプル方式）。
+  var MOUTH_SCROLL_H = 150;
   var mouthRowsClip = mouthMapPanel.add("panel");
-  mouthRowsClip.alignment = ["fill", "fill"];
+  mouthRowsClip.alignment = ["fill", "top"];
   mouthRowsClip.margins = 2;
-  mouthRowsClip.minimumSize = [60, 80];
-  mouthRowsClip.preferredSize.height = 120;
+  mouthRowsClip.minimumSize = [60, MOUTH_SCROLL_H];
+  mouthRowsClip.maximumSize = [4000, MOUTH_SCROLL_H];
+  mouthRowsClip.preferredSize.height = MOUTH_SCROLL_H;
 
   var mouthRowsGroup = mouthRowsClip.add("group");
   mouthRowsGroup.orientation = "column";
@@ -2652,17 +2655,15 @@
   function applyMouthScroll(value) {
     try {
       var m = 2;
-      // 立ち絵タブと同じく、幅・高さともウィンドウ由来で算出（読み取り依存だと
-      // 壊れる）。残りの空きに収まるので下のボタンが隠れない。
+      // 口パクは固定高さ + スクロールバー。高さは固定値（クリップ枠の高さ）。
+      // クリップ枠の size は設定しない（preferredSize/maximumSize で固定済み。
+      // 動的に size を設定するとリサイズ/追加で値が壊れるため）。幅だけ
+      // ウィンドウ由来でスクロールバー位置に使う（画面外へ消えるのを防ぐ）。
       var pw = availWidthForPanel(mouthRowsClip, tabLab);
-      var ph = availHeightForPanel(mouthRowsClip, tabLab);
-      try {
-        mouthRowsClip.size = [pw, ph];
-      } catch (ePh) {}
+      var ph = MOUTH_SCROLL_H;
       var sbW = 14;
       var innerH = ph - m * 2;
-      // size ではなく preferredSize（本来のコンテンツ高さ）で測る（スクロールバーが
-      // 出ない/壊れる対策。詳細は contentHeightOf 参照）
+      // 中身の高さは子要素の合計で測る（伸縮・頭打ちに影響されない）
       var contentH = contentHeightOf(mouthRowsGroup);
       var maxv = contentH - innerH;
       if (maxv < 0) maxv = 0;
