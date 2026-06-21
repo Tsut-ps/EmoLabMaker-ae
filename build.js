@@ -16,7 +16,7 @@
  *     ただし共有変数(win/tabs 等)は連結後に同一クロージャへ入る前提なので、
  *     エディタの「変数未定義」警告は出る（構文エラーではない）。
  *   - 連結順は実行順: 00_header(IIFEの外) → [05_open=定数/win・tabs生成 →
- *     core/*・ui/*=共通基盤 → 20/30/40=各タブ → 99=リサイズ/init] → IIFE終了。
+ *     core/*・ui/*=共通基盤 → tabs/*=各タブ → 99=リサイズ/init] → IIFE終了。
  */
 var fs = require("fs");
 var path = require("path");
@@ -47,9 +47,9 @@ var BODY = [
   "ui/scriptui.jsx",
   "ui/dialogs.jsx",
   // 各タブ（UI 構築＋ハンドラ。即時実行なので実行順を保つ）
-  "20_tab_lab.jsx",
-  "30_tab_psd.jsx",
-  "40_tab_stage.jsx",
+  "tabs/lab.jsx",
+  "tabs/psd.jsx",
+  "tabs/stage.jsx",
   "99_close.jsx"
 ];
 var IIFE_OPEN = Buffer.from("(function emoLabMaker(thisObj) {\n");
