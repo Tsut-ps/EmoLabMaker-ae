@@ -68,10 +68,22 @@ function readParts(names) {
   return Buffer.concat(bufs);
 }
 
+// IIFE 本体のインデント復元。
+// src/*.jsx は prettier で「トップレベル（0 インデント）」に整形されているが、
+// 連結後は IIFE の中に入るので、本体の各行を 2 スペース下げて元のネスト体裁に戻す。
+// （空行はそのまま。相対インデントは保たれる＝挙動は不変、見た目だけ復元）
+function indentBody(buf) {
+  var lines = buf.toString("utf8").split("\n");
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].length > 0) lines[i] = "  " + lines[i];
+  }
+  return Buffer.from(lines.join("\n"), "utf8");
+}
+
 var out = Buffer.concat([
   readParts(HEADER),
   IIFE_OPEN,
-  readParts(BODY),
+  indentBody(readParts(BODY)),
   IIFE_CLOSE
 ]);
 if (!fs.existsSync(OUT_DIR)) {
