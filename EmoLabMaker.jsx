@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 2.0.2
+ * @version 2.0.3
  * @description セットアップ + 立ち絵 + 口パク + 目パチ 統合パネル（PSDToolKit互換）
  *   Tab "セットアップ" : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
@@ -20,7 +20,7 @@
   // 共通定数
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
-  var EMO_VERSION = "2.0.2";
+  var EMO_VERSION = "2.0.3";
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
   var BLINK_SIGNATURE = "emoBlinkAuto";
 
@@ -4726,13 +4726,17 @@
     }
   }
 
-  // シーン直下に置かれた「独立した立ち絵」か。シーンに複数の立ち絵（複数の制御
-  // コンポ）があるとき、ルート直下の各立ち絵はそれぞれ別の制御に属する。これを
-  // 親(シーン)のトグルにすると、押下時に誤った制御コンポへ一括登録して全体を
-  // 壊すため、トグルにせずコンテナ見出しとして扱う。
-  function isIndependentStageRoot(node, multiRoot) {
+  // ルート直下に置かれた「無印のサブ階層コンテナ」か。
+  // シーン(コンポ1 等)に立ち絵を複数置くと、各立ち絵はルート直下の無印フォルダとして
+  // 現れ、かつ自分のサブ階層(目/口…)を持つ。これを親(シーン)のトグルにすると、押下時に
+  // 立ち絵コンテナ自体を誤った制御へ一括登録して中身ごと壊すため、トグルにせず
+  // 「展開専用のコンテナ見出し」にする。制御コンポを共有していても構造で判定できる。
+  //   - 対象: ルート直下(parent.isRoot) かつ サブ階層を持つ(hasChildren) かつ 無印
+  //   - 除外: * ラジオ/! 強制（明示的な選択肢なので従来どおり）、リーフのパート(目 等)
+  function isIndependentStageRoot(node) {
     var p = node ? node.parent : null;
-    return !!(multiRoot && node && !node.isRoot && p && p.isRoot);
+    if (!node || node.isRoot || !p || !p.isRoot) return false;
+    return !!(node.hasChildren && !node.refExclusive && !node.refForced);
   }
 
   function computeStageActive(nodes) {
@@ -4873,9 +4877,6 @@
   var stageNodes = [];
   var stageCollapsed = {};
   var stageCtrlComp = null;
-  // シーンに複数の立ち絵（=複数の制御コンポ）があるか。真のとき、シーン直下の
-  // 各立ち絵はトグルにせずコンテナ見出しにする（押すと誤登録で全体が壊れるバグの対策）。
-  var stageMultiRoot = false;
   var isRebuildingStage = false;
   var stageScrollValue = 0;
   var stageButtons = []; // 描画済み選択肢コントロール（追従の即時更新用）
@@ -5017,7 +5018,7 @@
     if (
       !node.isRoot &&
       !isWrapperRoot &&
-      !isIndependentStageRoot(node, stageMultiRoot) &&
+      !isIndependentStageRoot(node) &&
       node.refName &&
       parent
     ) {
@@ -5619,18 +5620,6 @@
         ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
         : [];
     }
-    // シーンに制御コンポが複数あれば「複数立ち絵シーン」とみなす（ルート直下の
-    // 各立ち絵を独立コンテナ扱いにして破壊的トグルを止める）。
-    var ctrlSeen = {};
-    var ctrlCount = 0;
-    for (i = 0; i < stageNodes.length; i++) {
-      var cn = stageNodes[i].ctrlComp ? stageNodes[i].ctrlComp.name : null;
-      if (cn && !ctrlSeen[cn]) {
-        ctrlSeen[cn] = true;
-        ctrlCount++;
-      }
-    }
-    stageMultiRoot = ctrlCount >= 2;
     computeStageActive(stageNodes);
   }
 
