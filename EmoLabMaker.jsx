@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 2.0.1
+ * @version 2.0.2
  * @description セットアップ + 立ち絵 + 口パク + 目パチ 統合パネル（PSDToolKit互換）
  *   Tab "セットアップ" : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
@@ -20,7 +20,7 @@
   // 共通定数
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
-  var EMO_VERSION = "2.0.1";
+  var EMO_VERSION = "2.0.2";
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
   var BLINK_SIGNATURE = "emoBlinkAuto";
 
@@ -4659,6 +4659,19 @@
         }
       }
 
+      // 制御コンポ名の伝播: コンテナ（目/口…の部分フォルダだけを直下に持ち、自身は
+      // 制御式を持たない）でも、子孫の立ち絵パートが属する制御コンポを引き継ぐ。
+      // これで「立ち絵コンテナがどの制御に属するか」が分かり、複数立ち絵の判定と
+      // 未登録パーツのフォールバック制御が正しくなる。
+      if (!nodeCtrlName) {
+        for (var cpi = 0; cpi < children.length; cpi++) {
+          if (children[cpi].ctrlCompName) {
+            nodeCtrlName = children[cpi].ctrlCompName;
+            break;
+          }
+        }
+      }
+
       var hasOwn = radio.length > 0 || optional.length > 0 || forced.length > 0;
       var out = [];
       var emit = isRoot ? hasOwn : hasOwn || children.length > 0;
@@ -4692,7 +4705,9 @@
   // ルート直下のパートは flatten で depth0 になるため、その親はルートノードにする
   // （ヘッダの ☑/◉ がルートの制御へ正しく書き込めるように）。
   // 各ノードの visibleSet は事前に解決済みであること。
-  function computeStageActive(nodes) {
+  // DFS順(親が子より前)前提で各ノードの parent を確定する。
+  // ルート直下のパートは flatten で depth0 になるため、その親はルートノードにする。
+  function assignStageParents(nodes) {
     var lastAtDepth = {};
     var rootNode = null;
     for (var i = 0; i < nodes.length; i++) {
@@ -4706,23 +4721,40 @@
       } else {
         parent = lastAtDepth[nn.depth - 1] || null;
       }
-      nn.parent = parent; // 折りたたみ判定にも使う
+      nn.parent = parent;
+      lastAtDepth[nn.depth] = nn;
+    }
+  }
+
+  // シーン直下に置かれた「独立した立ち絵」か。シーンに複数の立ち絵（複数の制御
+  // コンポ）があるとき、ルート直下の各立ち絵はそれぞれ別の制御に属する。これを
+  // 親(シーン)のトグルにすると、押下時に誤った制御コンポへ一括登録して全体を
+  // 壊すため、トグルにせずコンテナ見出しとして扱う。
+  function isIndependentStageRoot(node, multiRoot) {
+    var p = node ? node.parent : null;
+    return !!(multiRoot && node && !node.isRoot && p && p.isRoot);
+  }
+
+  function computeStageActive(nodes) {
+    assignStageParents(nodes);
+    for (var i = 0; i < nodes.length; i++) {
+      var nn = nodes[i];
       if (nn.isRoot) {
         nn.active = true;
-      } else {
-        var refVisible;
-        if (nn.refForced) {
-          refVisible = true;
-        } else if (nn.refExclusive) {
-          refVisible = parent
-            ? indexOfName(parent.visibleSet, nn.refName) >= 0
-            : true;
-        } else {
-          refVisible = true; // 無印フォルダ(コンテナ)は常に有効
-        }
-        nn.active = parent ? parent.active && refVisible : true;
+        continue;
       }
-      lastAtDepth[nn.depth] = nn;
+      var parent = nn.parent;
+      var refVisible;
+      if (nn.refForced) {
+        refVisible = true;
+      } else if (nn.refExclusive) {
+        refVisible = parent
+          ? indexOfName(parent.visibleSet, nn.refName) >= 0
+          : true;
+      } else {
+        refVisible = true; // 無印フォルダ(コンテナ)は常に有効
+      }
+      nn.active = parent ? parent.active && refVisible : true;
     }
   }
 
@@ -4841,6 +4873,9 @@
   var stageNodes = [];
   var stageCollapsed = {};
   var stageCtrlComp = null;
+  // シーンに複数の立ち絵（=複数の制御コンポ）があるか。真のとき、シーン直下の
+  // 各立ち絵はトグルにせずコンテナ見出しにする（押すと誤登録で全体が壊れるバグの対策）。
+  var stageMultiRoot = false;
   var isRebuildingStage = false;
   var stageScrollValue = 0;
   var stageButtons = []; // 描画済み選択肢コントロール（追従の即時更新用）
@@ -4978,7 +5013,14 @@
     var kind = null;
     // 実質ルート（立ち絵を包むだけの外側コンポの唯一の子）はチェックを出さない
     var isWrapperRoot = soleWrappedRef && node.refName === soleWrappedRef;
-    if (!node.isRoot && !isWrapperRoot && node.refName && parent) {
+    // シーン直下に並ぶ独立立ち絵もトグルにしない（押すと誤登録で全体が壊れるため）
+    if (
+      !node.isRoot &&
+      !isWrapperRoot &&
+      !isIndependentStageRoot(node, stageMultiRoot) &&
+      node.refName &&
+      parent
+    ) {
       if (node.refForced) {
         kind = cfgShowForced ? "headerForced" : null;
       } else if (node.refExclusive) {
@@ -5554,6 +5596,10 @@
     if (domChild) prefixCandidates.push(domChild);
     var common = detectCommonPrefix(childNames);
     if (common) prefixCandidates.push(common);
+    // 親リンクを先に確定しておき、制御コンポを「自前→祖先から継承→全体既定」の
+    // 順で解決する。これでシーンに複数の立ち絵があっても、各立ち絵の中身は
+    // それぞれ自分の制御コンポに紐づく（1体目の制御に巻き込まれない）。
+    assignStageParents(stageNodes);
     for (i = 0; i < stageNodes.length; i++) {
       var nd = stageNodes[i];
       // ルート直下に置かれた選択肢は「立ち絵全体の切替」。立ち絵名そのままだと
@@ -5561,13 +5607,30 @@
       nd.displayName = nd.isRoot
         ? "（ルート）"
         : stageDisplayName(nd.comp.name, prefixCandidates);
-      nd.ctrlComp =
-        (nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null) ||
-        stageCtrlComp;
+      var ownCtrl = nd.ctrlCompName ? findCompByName(nd.ctrlCompName) : null;
+      if (ownCtrl) {
+        nd.ctrlComp = ownCtrl;
+      } else if (nd.parent && nd.parent.ctrlComp) {
+        nd.ctrlComp = nd.parent.ctrlComp; // 祖先の立ち絵の制御を継承
+      } else {
+        nd.ctrlComp = stageCtrlComp;
+      }
       nd.visibleSet = nd.ctrlComp
         ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
         : [];
     }
+    // シーンに制御コンポが複数あれば「複数立ち絵シーン」とみなす（ルート直下の
+    // 各立ち絵を独立コンテナ扱いにして破壊的トグルを止める）。
+    var ctrlSeen = {};
+    var ctrlCount = 0;
+    for (i = 0; i < stageNodes.length; i++) {
+      var cn = stageNodes[i].ctrlComp ? stageNodes[i].ctrlComp.name : null;
+      if (cn && !ctrlSeen[cn]) {
+        ctrlSeen[cn] = true;
+        ctrlCount++;
+      }
+    }
+    stageMultiRoot = ctrlCount >= 2;
     computeStageActive(stageNodes);
   }
 
