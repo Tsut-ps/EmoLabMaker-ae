@@ -43,6 +43,7 @@ var BODY = [
   "core/lab.jsx",
   "core/psd.jsx",
   "core/blink.jsx",
+  "core/stage-model.jsx",
   "ui/scriptui.jsx",
   "ui/dialogs.jsx",
   // 各タブ（UI 構築＋ハンドラ。即時実行なので実行順を保つ）
