@@ -2606,7 +2606,7 @@
   );
   mouthMapPanel.orientation = "column";
   mouthMapPanel.alignChildren = ["fill", "top"];
-  mouthMapPanel.alignment = ["fill", "top"];
+  mouthMapPanel.alignment = ["fill", "fill"];
   mouthMapPanel.spacing = 4;
   mouthMapPanel.margins = 10;
 
@@ -2631,12 +2631,11 @@
 
   // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
   // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)
-  var MOUTH_SCROLL_H = 200; // 口パクの口形マッピングは固定高さ + スクロールバー
   var mouthRowsClip = mouthMapPanel.add("panel");
-  mouthRowsClip.alignment = ["fill", "top"];
+  mouthRowsClip.alignment = ["fill", "fill"];
   mouthRowsClip.margins = 2;
-  mouthRowsClip.minimumSize = [60, MOUTH_SCROLL_H];
-  mouthRowsClip.preferredSize.height = MOUTH_SCROLL_H;
+  mouthRowsClip.minimumSize = [60, 80];
+  mouthRowsClip.preferredSize.height = 120;
 
   var mouthRowsGroup = mouthRowsClip.add("group");
   mouthRowsGroup.orientation = "column";
@@ -2653,10 +2652,10 @@
   function applyMouthScroll(value) {
     try {
       var m = 2;
-      // 口パクは固定高さ + スクロールバー（リサイズで壊れないシンプル方式）。
-      // 幅だけウィンドウ由来で追従させ、スクロールバーが画面外へ消えないようにする。
+      // 立ち絵タブと同じく、幅・高さともウィンドウ由来で算出（読み取り依存だと
+      // 壊れる）。残りの空きに収まるので下のボタンが隠れない。
       var pw = availWidthForPanel(mouthRowsClip, tabLab);
-      var ph = MOUTH_SCROLL_H;
+      var ph = availHeightForPanel(mouthRowsClip, tabLab);
       try {
         mouthRowsClip.size = [pw, ph];
       } catch (ePh) {}
@@ -6080,10 +6079,13 @@
       avail -= (win.margins.top || 0) + (win.margins.bottom || 0);
     } catch (eM) {}
     try {
-      if (versionRow && versionRow.size) avail -= versionRow.size.height;
+      if (versionRow && versionRow.visible && versionRow.size) {
+        avail -= versionRow.size.height;
+      }
     } catch (eV) {}
-    avail -= 26; // タブバー（tabbedpanel のタブ見出し）概算
-    // panel から topTab まで遡り、各階層で「自分以外の兄弟＋spacing＋margins」を引く
+    avail -= 16; // タブバー（tabbedpanel のタブ見出し）概算
+    // panel から topTab まで遡り、各階層で「自分以外の兄弟＋spacing＋margins」を引く。
+    // 非表示の兄弟はレイアウト上の場所を取らないので引かない（高さ不足の原因）。
     var node = panel;
     var guard = 0;
     while (node && node !== topTab && guard < 20) {
@@ -6091,16 +6093,23 @@
       var parent = node.parent;
       if (!parent) break;
       var sib = 0;
+      var visKids = 0;
       var kids = parent.children;
       for (var i = 0; i < kids.length; i++) {
         if (kids[i] === node) continue;
+        var vis = true;
+        try {
+          vis = kids[i].visible !== false;
+        } catch (eVi) {}
+        if (!vis) continue;
+        visKids++;
         var h = 0;
         try {
           h = kids[i].size ? kids[i].size.height : 0;
         } catch (eK) {}
         sib += h;
       }
-      if (kids.length > 1) sib += (kids.length - 1) * (parent.spacing || 0);
+      sib += visKids * (parent.spacing || 0); // panel と各兄弟の間の spacing
       try {
         sib += (parent.margins.top || 0) + (parent.margins.bottom || 0);
       } catch (eP) {}
