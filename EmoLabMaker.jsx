@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 2.0.0
+ * @version 2.0.1
  * @description セットアップ + 立ち絵 + 口パク + 目パチ 統合パネル（PSDToolKit互換）
  *   Tab "セットアップ" : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)
@@ -20,7 +20,7 @@
   // 共通定数
   // ════════════════════════════════════════════════════════════════
   var BUTTON_HEIGHT = 24;
-  var EMO_VERSION = "2.0.0";
+  var EMO_VERSION = "2.0.1";
   var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
   var BLINK_SIGNATURE = "emoBlinkAuto";
 
@@ -4455,10 +4455,14 @@
     var i, k;
     for (i = 0; i < names.length; i++) {
       var n = names[i];
-      // この名前が含む「_ まで」の各 prefix 候補を加点
+      // この名前が含む「_ まで」の各 prefix 候補を加点。
+      // ただし * / ! マーカーを含む候補は除外する。キャラ prefix（Mhime_ 等）は
+      // マーカーより前にあり、マーカーを含まない。* や ! を含む "*閉_" のような
+      // ものを prefix として剥がすと、排他マーカーまで消えて任意指定に化ける。
       for (k = 0; k < n.length; k++) {
         if (n.charAt(k) === "_") {
           var cand = n.substring(0, k + 1);
+          if (cand.indexOf("*") >= 0 || cand.indexOf("!") >= 0) continue;
           counts[cand] = (counts[cand] || 0) + 1;
         }
       }
