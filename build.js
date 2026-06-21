@@ -40,6 +40,7 @@ var BODY = [
   "core/expressions.jsx",
   "core/markers.jsx",
   "core/emoset.jsx",
+  "core/lab.jsx",
   "ui/scriptui.jsx",
   "ui/dialogs.jsx",
   // 各タブ（UI 構築＋ハンドラ。即時実行なので実行順を保つ）
