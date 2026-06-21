@@ -2654,7 +2654,10 @@
       var m = 2;
       var psz = panelActualSize(mouthRowsClip, 360, 168);
       var pw = psz[0];
-      var ph = psz[1];
+      var ph = availHeightForPanel(mouthRowsClip, tabLab);
+      try {
+        mouthRowsClip.size = [pw, ph];
+      } catch (ePh) {}
       var sbW = 14;
       var innerH = ph - m * 2;
       // size ではなく preferredSize（本来のコンテンツ高さ）で測る（スクロールバーが
@@ -6061,13 +6064,63 @@
     return contentHeightOf(stageGrid);
   }
 
+  // スクロールパネルが使える高さを「ウィンドウ高さ − 他要素の高さ」で算出する。
+  // パネル自身の size/bounds はリサイズに追従しないことがあるため、固定高さの
+  // 兄弟要素（ヘッダ行・ボタン行など）を引いて求める方が確実（ユーザー案）。
+  function availHeightForPanel(panel, topTab) {
+    var avail = 0;
+    try {
+      avail = win.size ? win.size.height : 0;
+    } catch (eW) {}
+    if (!avail) avail = 560;
+    // ウィンドウ枠のオーバーヘッド（マージン + バージョン行 + タブバー）
+    try {
+      avail -= (win.margins.top || 0) + (win.margins.bottom || 0);
+    } catch (eM) {}
+    try {
+      if (versionRow && versionRow.size) avail -= versionRow.size.height;
+    } catch (eV) {}
+    avail -= 26; // タブバー（tabbedpanel のタブ見出し）概算
+    // panel から topTab まで遡り、各階層で「自分以外の兄弟＋spacing＋margins」を引く
+    var node = panel;
+    var guard = 0;
+    while (node && node !== topTab && guard < 20) {
+      guard++;
+      var parent = node.parent;
+      if (!parent) break;
+      var sib = 0;
+      var kids = parent.children;
+      for (var i = 0; i < kids.length; i++) {
+        if (kids[i] === node) continue;
+        var h = 0;
+        try {
+          h = kids[i].size ? kids[i].size.height : 0;
+        } catch (eK) {}
+        sib += h;
+      }
+      if (kids.length > 1) sib += (kids.length - 1) * (parent.spacing || 0);
+      try {
+        sib += (parent.margins.top || 0) + (parent.margins.bottom || 0);
+      } catch (eP) {}
+      avail -= sib;
+      node = parent;
+    }
+    if (avail < 80) avail = 80;
+    return avail;
+  }
+
   // ツリーのスクロール: 中身(stageGrid)を上下に動かし、パネルでクリップする。
   function applyStageScroll(value) {
     try {
       var m = getPanelMarginOf(stageGridPanel);
       var psz = panelActualSize(stageGridPanel, 360, 200);
       var pw = psz[0];
-      var ph = psz[1];
+      // 高さはウィンドウから他要素を引いて算出（パネルの size はリサイズに
+      // 追従しないため）。算出した高さをパネルにも反映してクリップ域を合わせる。
+      var ph = availHeightForPanel(stageGridPanel, tabStage);
+      try {
+        stageGridPanel.size = [pw, ph];
+      } catch (ePh) {}
       var sbW = 14;
       var innerH = ph - m * 2;
       // 中身の高さは preferredSize（=コンテンツ本来の高さ）で測る。size はパネルに
