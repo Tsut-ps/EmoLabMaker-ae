@@ -299,11 +299,11 @@
     );
   } catch (eVc) {}
 
-  // 表示順は作業フロー基準: 立ち絵(日常のハブ) → 口パク → 目パチ → PSD(初期セットアップ) → 詳細(旧レイヤー選択)
+  // 表示順は作業フロー基準: PSD(初期セットアップ) → 立ち絵(日常のハブ) → 口パク → 目パチ → 詳細(旧レイヤー選択)
+  var tabPsd = tabs.add("tab", undefined, "PSD");
   var tabStage = tabs.add("tab", undefined, "立ち絵");
   var tabLab = tabs.add("tab", undefined, "口パク");
   var tabBlink = tabs.add("tab", undefined, "目パチ");
-  var tabPsd = tabs.add("tab", undefined, "PSD");
   var tabSelector = tabs.add("tab", undefined, "詳細");
 
   tabSelector.orientation = "column";
@@ -331,7 +331,8 @@
   tabStage.spacing = 8;
   tabStage.margins = 8;
 
-  tabs.selection = 0;
+  // 並びは PSD が先頭だが、日常のハブである立ち絵を初期選択にする
+  tabs.selection = tabStage;
 
   // ════════════════════════════════════════════════════════════════
   //
