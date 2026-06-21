@@ -299,8 +299,8 @@
     );
   } catch (eVc) {}
 
-  // 表示順は作業フロー基準: PSD(初期セットアップ) → 立ち絵(日常のハブ) → 口パク → 目パチ → 詳細(旧レイヤー選択)
-  var tabPsd = tabs.add("tab", undefined, "PSD");
+  // 表示順は作業フロー基準: セットアップ(PSD取込・初期準備) → 立ち絵(日常のハブ) → 口パク → 目パチ → 詳細(旧レイヤー選択)
+  var tabPsd = tabs.add("tab", undefined, "セットアップ");
   var tabStage = tabs.add("tab", undefined, "立ち絵");
   var tabLab = tabs.add("tab", undefined, "口パク");
   var tabBlink = tabs.add("tab", undefined, "目パチ");
@@ -5457,7 +5457,7 @@
   stageRootDropdown.alignment = ["fill", "center"];
   stageRootDropdown.minimumSize = [DROPDOWN_MIN_W, BUTTON_HEIGHT];
   stageRootDropdown.preferredSize.height = BUTTON_HEIGHT;
-  stageRootDropdown.helpTip = "立ち絵のルートコンポ（PSDタブで読み込んだコンポ）";
+  stageRootDropdown.helpTip = "立ち絵のルートコンポ（セットアップタブで読み込んだコンポ）";
 
   var stageRefreshBtn = stageTopRow.add("button", undefined, "更新");
   stageRefreshBtn.preferredSize = [52, BUTTON_HEIGHT];
@@ -5769,7 +5769,7 @@
         var empty = stageGrid.add(
           "statictext",
           undefined,
-          "階層が見つかりません。PSDタブでセットアップしたコンポをルートに選んでください。"
+          "階層が見つかりません。セットアップタブでセットアップしたコンポをルートに選んでください。"
         );
         empty.alignment = ["fill", "top"];
         stageGrid.layout.layout(true);
@@ -6451,7 +6451,7 @@
     dlg.spacing = 6;
     var lines = [
       "【立ち絵タブ】PSDToolKit 立ち絵の階層をまとめて切り替えます。",
-      "1. 設定済みの立ち絵ルートコンポを選ぶ（PSDタブでセットアップ済みのもののみ表示）",
+      "1. 設定済みの立ち絵ルートコンポを選ぶ（セットアップタブでセットアップ済みのもののみ表示）",
       "2. 目/口/服などの階層がインデントで並びます",
       "   - ラジオ（* レイヤー/コンポ）= ボタン（1つだけ表示）",
       "   - 任意指定（無印レイヤー）= チェックボックス（独立 ON/OFF）",
