@@ -43,6 +43,7 @@ win.onActivate = function () {
   rebuildStageRootDropdown(name);
   refreshStage(false);
   refreshMouthScroll();
+  refreshMouthCoverage();
 })();
 
 if (win instanceof Window) {

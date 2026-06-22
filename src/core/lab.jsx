@@ -33,6 +33,26 @@ function isConsonantPhoneme(name) {
   return !!name && !isCommonPhoneme(name);
 }
 
+// usedPhonemes（配置する＝使う音素）のうち、mappedPhonemes（どこかの口形に割当済み
+// の音素の集合）に含まれないものを返す。これらは口形未割当＝閉じ口になるため、
+// 口形状マッピングのカバレッジ警告に使う。重複は除く。
+function findUnmappedPhonemes(usedPhonemes, mappedPhonemes) {
+  var mapped = {};
+  var i;
+  for (i = 0; i < (mappedPhonemes ? mappedPhonemes.length : 0); i++) {
+    mapped[mappedPhonemes[i]] = true;
+  }
+  var out = [];
+  var seen = {};
+  for (i = 0; i < (usedPhonemes ? usedPhonemes.length : 0); i++) {
+    var p = usedPhonemes[i];
+    if (!p || mapped[p] || seen[p]) continue;
+    seen[p] = true;
+    out.push(p);
+  }
+  return out;
+}
+
 function parseLabPhonemeEntries(content) {
   var lines = content.split(/\r?\n/);
   var entries = [];

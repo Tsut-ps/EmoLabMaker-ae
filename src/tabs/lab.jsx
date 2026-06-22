@@ -83,6 +83,7 @@ bulkPhonemeInput.helpTip =
 bulkPhonemeInput.onChange = function () {
   cfgImportPhonemes = bulkPhonemeInput.text;
   setSettingStr("importPhonemes", cfgImportPhonemes);
+  refreshMouthCoverage();
 };
 var bulkPhonemeVowelBtn = bulkPhonemeRow.add("button", undefined, "母音+ん");
 bulkPhonemeVowelBtn.preferredSize = [64, BUTTON_HEIGHT];
@@ -92,6 +93,7 @@ bulkPhonemeVowelBtn.onClick = function () {
   bulkPhonemeInput.text = "a,i,u,e,o,N,pau,sil,cl,Q,br";
   cfgImportPhonemes = bulkPhonemeInput.text;
   setSettingStr("importPhonemes", cfgImportPhonemes);
+  refreshMouthCoverage();
 };
 var bulkPhonemeConsonantBtn = bulkPhonemeRow.add("button", undefined, "子音");
 bulkPhonemeConsonantBtn.preferredSize = [48, BUTTON_HEIGHT];
@@ -119,6 +121,7 @@ bulkPhonemeConsonantBtn.onClick = function () {
   bulkPhonemeInput.text = merged.join(",");
   cfgImportPhonemes = bulkPhonemeInput.text;
   setSettingStr("importPhonemes", cfgImportPhonemes);
+  refreshMouthCoverage();
 };
 var bulkPhonemeAllBtn = bulkPhonemeRow.add("button", undefined, "すべて");
 bulkPhonemeAllBtn.preferredSize = [56, BUTTON_HEIGHT];
@@ -127,6 +130,7 @@ bulkPhonemeAllBtn.onClick = function () {
   bulkPhonemeInput.text = "";
   cfgImportPhonemes = "";
   setSettingStr("importPhonemes", "");
+  refreshMouthCoverage();
 };
 
 var bulkBtnRow = bulkPanel.add("group");
@@ -352,6 +356,7 @@ function setPhonemeSelection(selector) {
   for (var i = 0; i < phonemeData.length; i++) {
     phonemeData[i].checkbox.value = selector(phonemeData[i]);
   }
+  refreshMouthCoverage();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -581,6 +586,9 @@ function addMouthRow(label, preset, isClosed) {
   var csvInput = row.add("edittext", undefined, preset);
   csvInput.preferredSize = [96, BUTTON_HEIGHT];
   csvInput.helpTip = "この口形で表示する音素（カンマ区切り）";
+  csvInput.onChange = function () {
+    refreshMouthCoverage();
+  };
 
   var closedCheck = row.add("checkbox", undefined, "閉");
   closedCheck.value = !!isClosed;
@@ -645,6 +653,7 @@ function addMouthRow(label, preset, isClosed) {
       mouthMapPanel.layout.layout(true);
       refreshMouthScroll();
     } catch (e) {}
+    refreshMouthCoverage();
   };
   return rowData;
 }
@@ -692,6 +701,51 @@ mouthApplyBtn.helpTip =
 var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
 mouthRemoveBtn.helpTip =
   "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
+
+// 口形カバレッジ警告: 「使う音素」のうち、どの口形にも未割当（＝閉じ口になる）ものを示す
+var mouthCoverageWarn = mouthMapPanel.add("statictext", undefined, "");
+mouthCoverageWarn.alignment = ["fill", "top"];
+setCheckColor(mouthCoverageWarn, [0.95, 0.45, 0.15, 1]); // 立ち絵ツリーの ⚠ と同系色
+mouthCoverageWarn.visible = false;
+
+// 「使う音素」= lab 読込済みならチェック中の音素 / 無ければ一括フィルタ / 無ければ母音+ん
+function collectUsedPhonemes() {
+  var out = [];
+  var i;
+  if (phonemeData && phonemeData.length > 0) {
+    for (i = 0; i < phonemeData.length; i++) {
+      if (phonemeData[i].checkbox && phonemeData[i].checkbox.value) {
+        out.push(phonemeData[i].phoneme);
+      }
+    }
+    return out;
+  }
+  var f = normalizeCsvTokens(bulkPhonemeInput.text);
+  if (f.length > 0) return f;
+  return commonPhonemes.slice(0);
+}
+
+// 口形マッピングのカバレッジを再計算して警告表示を更新する
+function refreshMouthCoverage() {
+  if (!mouthCoverageWarn) return; // UI 構築前のガード
+  var mapped = [];
+  for (var r = 0; r < mouthRows.length; r++) {
+    var toks = normalizeCsvTokens(mouthRows[r].csvInput.text);
+    for (var t = 0; t < toks.length; t++) mapped.push(toks[t]);
+  }
+  var unmapped = findUnmappedPhonemes(collectUsedPhonemes(), mapped);
+  if (unmapped.length > 0) {
+    mouthCoverageWarn.text =
+      "⚠ 口形に未割当（閉じ口になります）: " + unmapped.join(", ");
+    mouthCoverageWarn.visible = true;
+  } else {
+    mouthCoverageWarn.text = "";
+    mouthCoverageWarn.visible = false;
+  }
+  try {
+    mouthMapPanel.layout.layout(true);
+  } catch (e) {}
+}
 
 mouthAutoBtn.onClick = function () {
   var comp = getActiveComp();
@@ -802,6 +856,7 @@ mouthPresetBtn.onClick = function () {
     return;
   }
   resetMouthRowsToDefault();
+  refreshMouthCoverage();
 };
 
 // 現在のコンポの口パク設定済みレイヤーを読み取り、各行に取り込む(#K)
@@ -877,6 +932,7 @@ mouthImportBtn.onClick = function () {
     mouthMapPanel.layout.layout(true);
     refreshMouthScroll();
   } catch (eL) {}
+  refreshMouthCoverage();
   alert("現在のマッピングを取り込みました（" + groups.length + " 口形）。");
 };
 
@@ -1178,6 +1234,9 @@ browseBtn.onClick = function () {
 
     var cb = itemGroup.add("checkbox", undefined, "");
     cb.value = isCommonPhoneme(item.phoneme);
+    cb.onClick = function () {
+      refreshMouthCoverage();
+    };
 
     var label = itemGroup.add(
       "statictext",
@@ -1207,6 +1266,7 @@ browseBtn.onClick = function () {
   win.layout.resize();
 
   createBtn.enabled = sortedPhonemes.length > 0;
+  refreshMouthCoverage(); // 読込で「使う音素」が変わるので警告を更新
 };
 
 // 全選択
