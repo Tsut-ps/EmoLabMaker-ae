@@ -543,3 +543,43 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
   }
   return report;
 }
+
+// 立ち絵ルートとその配下の全ネストコンポの尺を targetDuration まで伸ばす（縮めはしない）。
+// 各コンポ内レイヤーの outPoint もコンポ終端まで伸ばし、立ち絵が途中で消えないようにする。
+// 戻り値: { comps: 尺を伸ばしたコンポ数, layers: outPoint を伸ばしたレイヤー数, scanned: 走査コンポ数 }
+function extendStageComps(rootComp, targetDuration) {
+  var result = { comps: 0, layers: 0, scanned: 0 };
+  if (!rootComp || !(targetDuration > 0)) return result;
+  var seen = {};
+  var stack = [rootComp];
+  while (stack.length > 0) {
+    var comp = stack.pop();
+    if (!comp || seen[comp.id]) continue;
+    seen[comp.id] = true;
+    result.scanned++;
+    var extended = false;
+    try {
+      if (comp.duration < targetDuration) {
+        comp.duration = targetDuration;
+        extended = true;
+      }
+    } catch (eDur) {}
+    var dur = comp.duration;
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var layer = comp.layer(i);
+      try {
+        if (layer.outPoint < dur) {
+          layer.outPoint = dur;
+          result.layers++;
+        }
+      } catch (eOut) {}
+      var src = null;
+      try {
+        src = layer.source;
+      } catch (eSrc) {}
+      if (src && src instanceof CompItem && !seen[src.id]) stack.push(src);
+    }
+    if (extended) result.comps++;
+  }
+  return result;
+}

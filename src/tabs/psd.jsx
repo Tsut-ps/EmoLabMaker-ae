@@ -143,6 +143,85 @@ psdStripBtn.onClick = function () {
 };
 
 // ══════════════════════════════════════════════════════════════════
+// 尺をそろえる（立ち絵コンポの一括尺伸ばし）
+// ══════════════════════════════════════════════════════════════════
+
+var psdExtendPanel = tabPsd.add("panel", undefined, "尺をそろえる（一括）");
+psdExtendPanel.orientation = "column";
+psdExtendPanel.alignChildren = ["fill", "top"];
+psdExtendPanel.alignment = ["fill", "top"];
+psdExtendPanel.margins = 10;
+psdExtendPanel.spacing = 4;
+var psdExtendHint = psdExtendPanel.add(
+  "statictext",
+  undefined,
+  "「ルート」の立ち絵と配下の全コンポ・レイヤーの尺をまとめて伸ばします（縮めません）",
+);
+psdExtendHint.alignment = ["fill", "top"];
+var psdExtendRow = psdExtendPanel.add("group");
+psdExtendRow.orientation = "row";
+psdExtendRow.alignChildren = ["left", "center"];
+psdExtendRow.spacing = 5;
+psdExtendRow.add("statictext", undefined, "長さ(秒)");
+var psdExtendInput = psdExtendRow.add("edittext", undefined, "");
+psdExtendInput.preferredSize = [70, BUTTON_HEIGHT];
+psdExtendInput.helpTip = "伸ばしたい長さ（秒）。既定はアクティブなコンポの長さ";
+var psdExtendActiveBtn = psdExtendRow.add("button", undefined, "アクティブの長さ");
+psdExtendActiveBtn.helpTip = "アクティブなコンポの長さを入力欄に入れる";
+var psdExtendBtn = psdExtendRow.add("button", undefined, "適用");
+psdExtendBtn.helpTip =
+  "ルートの立ち絵と配下の全ネストコンポの尺、各レイヤーの outPoint をこの長さまで伸ばす";
+
+// 起動時にアクティブコンポの長さを既定値として入れておく
+(function () {
+  var ac = getActiveComp();
+  if (ac && ac.duration) {
+    psdExtendInput.text = String(Math.round(ac.duration * 1000) / 1000);
+  }
+})();
+
+psdExtendActiveBtn.onClick = function () {
+  var ac = getActiveComp();
+  if (!ac) {
+    alert("アクティブなコンポジションがありません。");
+    return;
+  }
+  psdExtendInput.text = String(Math.round(ac.duration * 1000) / 1000);
+};
+
+psdExtendBtn.onClick = function () {
+  var root = getSelectedComp(psdRootRow.dropdown) || getActiveComp();
+  if (!root) {
+    alert("尺を伸ばす立ち絵のルートコンポを「ルート」で選んでください。");
+    return;
+  }
+  var sec = parseFloat(psdExtendInput.text);
+  if (!(sec > 0)) {
+    alert("長さ(秒)に正の数を入力してください。");
+    return;
+  }
+  var res;
+  beginUndo("EmoLabMaker: 立ち絵の尺をそろえる");
+  try {
+    res = extendStageComps(root, sec);
+  } finally {
+    endUndo();
+  }
+  psdStatusText.text =
+    "尺をそろえました（" +
+    sec +
+    "秒）: コンポ " +
+    res.comps +
+    "/" +
+    res.scanned +
+    " ・ レイヤー " +
+    res.layers +
+    " を延長（" +
+    root.name +
+    "）。";
+};
+
+// ══════════════════════════════════════════════════════════════════
 // 目パチ (自動まばたき)
 // ══════════════════════════════════════════════════════════════════
 
