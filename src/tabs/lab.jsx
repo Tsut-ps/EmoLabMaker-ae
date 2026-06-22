@@ -93,6 +93,33 @@ bulkPhonemeVowelBtn.onClick = function () {
   cfgImportPhonemes = bulkPhonemeInput.text;
   setSettingStr("importPhonemes", cfgImportPhonemes);
 };
+var bulkPhonemeConsonantBtn = bulkPhonemeRow.add("button", undefined, "子音");
+bulkPhonemeConsonantBtn.preferredSize = [48, BUTTON_HEIGHT];
+bulkPhonemeConsonantBtn.helpTip =
+  "現在の指定に子音(k/s/t…)を追加（空＝全指定のときは母音+ん＋子音にする）";
+bulkPhonemeConsonantBtn.onClick = function () {
+  // 現在のトークン（空なら母音+ん）に子音をマージして重複を除く
+  var cur = normalizeCsvTokens(bulkPhonemeInput.text);
+  if (cur.length === 0) cur = normalizeCsvTokens("a,i,u,e,o,N,pau,sil,cl,Q,br");
+  var seen = {};
+  var merged = [];
+  var i;
+  for (i = 0; i < cur.length; i++) {
+    if (!seen[cur[i]]) {
+      seen[cur[i]] = true;
+      merged.push(cur[i]);
+    }
+  }
+  for (i = 0; i < CONSONANT_PHONEMES.length; i++) {
+    if (!seen[CONSONANT_PHONEMES[i]]) {
+      seen[CONSONANT_PHONEMES[i]] = true;
+      merged.push(CONSONANT_PHONEMES[i]);
+    }
+  }
+  bulkPhonemeInput.text = merged.join(",");
+  cfgImportPhonemes = bulkPhonemeInput.text;
+  setSettingStr("importPhonemes", cfgImportPhonemes);
+};
 var bulkPhonemeAllBtn = bulkPhonemeRow.add("button", undefined, "すべて");
 bulkPhonemeAllBtn.preferredSize = [56, BUTTON_HEIGHT];
 bulkPhonemeAllBtn.helpTip = "すべての音素を配置（絞り込みなし）";
@@ -307,6 +334,14 @@ var commonPhonemes = [
   "br",
 ];
 
+// 一括読み込みの「子音」ボタンで足す標準的な日本語子音（OpenJTalk/VOICEVOX系）。
+// 単体読込はファイル内の子音を直接拾うが、一括はファイル非依存なのでこの一覧を使う。
+var CONSONANT_PHONEMES = [
+  "k", "ky", "g", "gy", "s", "sh", "z", "j", "t", "ts", "ch", "d",
+  "n", "ny", "h", "hy", "f", "b", "by", "p", "py", "m", "my",
+  "y", "r", "ry", "w", "v",
+];
+
 var phonemeData = [];
 var labFile = null;
 
@@ -332,8 +367,13 @@ phonemeSelectorGroup.spacing = 5;
 
 var selectAllBtn = phonemeSelectorGroup.add("button", undefined, "すべて");
 selectAllBtn.alignment = ["fill", "center"];
-var selectCommonBtn = phonemeSelectorGroup.add("button", undefined, "かんたん");
+var selectCommonBtn = phonemeSelectorGroup.add("button", undefined, "母音+ん");
 selectCommonBtn.alignment = ["fill", "center"];
+selectCommonBtn.helpTip = "母音・ん・無音/閉じ系を選択（基本はこれでOK）";
+var selectConsonantBtn = phonemeSelectorGroup.add("button", undefined, "子音");
+selectConsonantBtn.alignment = ["fill", "center"];
+selectConsonantBtn.helpTip =
+  "ファイル内の子音(k/s/t…)も追加でチェック（より細かい口の動き）";
 var deselectAllBtn = phonemeSelectorGroup.add("button", undefined, "解除");
 deselectAllBtn.alignment = ["fill", "center"];
 
@@ -1183,10 +1223,17 @@ deselectAllBtn.onClick = function () {
   });
 };
 
-// よく使うものを選択
+// 母音+ん（よく使うもの）を選択
 selectCommonBtn.onClick = function () {
   setPhonemeSelection(function (item) {
     return isCommonPhoneme(item.phoneme);
+  });
+};
+
+// 子音をチェックに「追加」する（現在の選択は維持。母音+ん → 子音 で母音ん＋子音に）
+selectConsonantBtn.onClick = function () {
+  setPhonemeSelection(function (item) {
+    return item.checkbox.value || isConsonantPhoneme(item.phoneme);
   });
 };
 
