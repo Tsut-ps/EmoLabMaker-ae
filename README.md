@@ -1,6 +1,6 @@
 # EmoLabMaker-ae
 
-<img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/b9d60e27-30a8-4e8a-91da-5b4fccd808cb" />
+<img width="1280" height="720" alt="EmoLabMaker v2" src="https://github.com/user-attachments/assets/3809a8ec-e456-4d54-b367-461eec51fe36" />
 
 EmoLabMaker は、
 
