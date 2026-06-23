@@ -2,7 +2,7 @@
 
 <img width="1280" height="720" alt="image" src="https://github.com/user-attachments/assets/b9d60e27-30a8-4e8a-91da-5b4fccd808cb" />
 
-`EmoLabMaker` は、
+EmoLabMaker は、
 
 - 立ち絵の階層表示で表情切り替え
 - lab ファイルを使った口パク、自動目パチ
@@ -10,8 +10,13 @@
 
 をかんたんに行うことができる、After Effects のスクリプトです
 
+
+## これ is 何？
+
+https://github.com/user-attachments/assets/7843ca7f-e059-45b1-8d44-26be9f45a0a5
+
 もともとの `emo2layer`（表情切り替え）と `lab2layer`（口パク機能）を統合したスクリプトで、  
-現在は「セットアップ / 立ち絵 / 口パク / 目パチ」の 4 つのタブを切り替えて使えます
+現在は「セットアップ / 立ち絵 / 口パク / 目パチ」の 4 つのタブを切り替えて使います
 
 > [!NOTE]
 > v2 から大幅に刷新し、PSDToolKit 互換対応により、機能を立ち絵タブに統合しました  
