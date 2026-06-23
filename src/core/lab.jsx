@@ -375,11 +375,9 @@ function buildLabMappedExpression(
   myCsv,
   allCsv,
   isClosedFallback,
-  emoCtx,
   labTag,
 ) {
   var lines = ["// " + LAB_MAP_SIGNATURE];
-  if (emoCtx) lines.push("// " + EXPR_SIGNATURE);
 
   lines = lines
     .concat([
@@ -396,25 +394,8 @@ function buildLabMappedExpression(
       "var shown = false;",
       'if (speaking && myPhonemes.indexOf("," + phoneme + ",") >= 0) shown = true;',
       'if (speaking && isClosedFallback && allPhonemes.indexOf("," + phoneme + ",") < 0) shown = true;',
+      "speaking ? (shown ? 100 : 0) : (isClosedFallback ? 100 : 0);",
     ]);
-
-  if (emoCtx) {
-    lines = lines
-      .concat(buildEmoMarkerSnippet(emoCtx.ctrlCompName, emoCtx.targetCompName))
-      .concat([
-        "var result;",
-        "if (speaking) {",
-        "  result = shown ? 100 : 0;",
-        "} else {",
-        "  var ctrlLayer = findCtrlLayer();",
-        "  var markerName = getCurrentMarkerName(ctrlLayer);",
-        '  result = markerName !== null && ("," + markerName + ",").indexOf("," + thisLayer.name + ",") >= 0 ? 100 : 0;',
-        "}",
-        "result;",
-      ]);
-  } else {
-    lines.push("speaking ? (shown ? 100 : 0) : (isClosedFallback ? 100 : 0);");
-  }
 
   return lines.join("\n");
 }
@@ -484,23 +465,19 @@ function describeAssignedLayers(layers) {
 /**
  * items = [{ layer, myCsv, isClosedFallback }] に口形マッピング式を適用する。
  * emoCtx があれば非発話中は表情のラジオ選択にフォールバックする合成式になる。
- * 戻り値: { applied, emoLinked, stale }
+ * 戻り値: { applied, stale }
  */
 function applyMappingToLayers(items, phonemeCompName, allCsv, labTag) {
   var applied = 0;
-  var emoLinked = 0;
   var stale = 0;
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
-    var emoCtx = null;
     try {
-      emoCtx = parseEmoContext(it.layer);
       it.layer.transform.opacity.expression = buildLabMappedExpression(
         phonemeCompName,
         it.myCsv,
         allCsv,
         it.isClosedFallback,
-        emoCtx,
         labTag,
       );
       it.layer.enabled = true;
@@ -509,9 +486,8 @@ function applyMappingToLayers(items, phonemeCompName, allCsv, labTag) {
       continue;
     }
     applied++;
-    if (emoCtx) emoLinked++;
   }
-  return { applied: applied, emoLinked: emoLinked, stale: stale };
+  return { applied: applied, stale: stale };
 }
 
 // ラベルから自動割当用のキーを取り出す（"ん(閉)" → ["ん","閉"]、"あ" → ["あ"]）

@@ -1052,7 +1052,6 @@ mouthApplyBtn.onClick = function () {
     endUndo();
   }
   var appliedCount = result.applied;
-  var emoLinkedCount = result.emoLinked;
   var staleCount = result.stale;
 
   var message =
@@ -1060,12 +1059,6 @@ mouthApplyBtn.onClick = function () {
     appliedCount +
     " レイヤーにマッピングを設定しました。\n音素ソース: " +
     phonemeCompName;
-  if (emoLinkedCount > 0) {
-    message +=
-      "\n表情切替と共存: " +
-      emoLinkedCount +
-      " レイヤー（非発話中は表情に従います）";
-  }
   if (suppressCount > 0) {
     message +=
       "\nグループ優先: 他 " +
