@@ -512,10 +512,17 @@ function applyMouthScroll(value) {
   try {
     var m = 2;
     // 口パクは固定高さ + スクロールバー。高さは固定値（クリップ枠の高さ）。
-    // クリップ枠の size は設定しない（preferredSize/maximumSize で固定済み。
-    // 動的に size を設定するとリサイズ/追加で値が壊れるため）。幅だけ
-    // ウィンドウ由来でスクロールバー位置に使う（画面外へ消えるのを防ぐ）。
-    var pw = availWidthForPanel(mouthRowsClip, tabLab);
+    // スクロールバーの横位置は「クリップ枠の実寸幅」を使う。ウィンドウ由来の
+    // 推定幅(availWidthForPanel)だと実幅より広く見積もったとき、スクロールバーが
+    // 右端の外に出て見えなくなるため（＝今回の不具合）。実寸が取れなければ推定で代替。
+    var clipW = 0;
+    try {
+      if (mouthRowsClip.size && mouthRowsClip.size.width) {
+        clipW = mouthRowsClip.size.width;
+      }
+    } catch (eW0) {}
+    if (!clipW || clipW < 40) clipW = availWidthForPanel(mouthRowsClip, tabLab);
+    var pw = clipW;
     var ph = MOUTH_SCROLL_H;
     var sbW = 14;
     var innerH = ph - m * 2;
@@ -708,21 +715,34 @@ mouthCoverageWarn.alignment = ["fill", "top"];
 setCheckColor(mouthCoverageWarn, [0.95, 0.45, 0.15, 1]); // 立ち絵ツリーの ⚠ と同系色
 mouthCoverageWarn.visible = false;
 
-// 「使う音素」= lab 読込済みならチェック中の音素 / 無ければ一括フィルタ / 無ければ母音+ん
+// 「使う音素」= lab読込中のチェック音素 ∪ 一括読み込みの音素入力（ベースライン）。
+// どちらも空なら母音+ん。lab と一括の指定が前後しても、両方をカバレッジ判定に含める。
 function collectUsedPhonemes() {
   var out = [];
+  var seen = {};
   var i;
+  function add(p) {
+    if (p && !seen[p]) {
+      seen[p] = true;
+      out.push(p);
+    }
+  }
+  // lab 読込中: チェック中の音素
   if (phonemeData && phonemeData.length > 0) {
     for (i = 0; i < phonemeData.length; i++) {
       if (phonemeData[i].checkbox && phonemeData[i].checkbox.value) {
-        out.push(phonemeData[i].phoneme);
+        add(phonemeData[i].phoneme);
       }
     }
-    return out;
   }
+  // 一括読み込みの音素入力（＝使う音素のベースライン）も常に加える
   var f = normalizeCsvTokens(bulkPhonemeInput.text);
-  if (f.length > 0) return f;
-  return commonPhonemes.slice(0);
+  for (i = 0; i < f.length; i++) add(f[i]);
+  // どちらも空なら母音+ん
+  if (out.length === 0) {
+    for (i = 0; i < commonPhonemes.length; i++) add(commonPhonemes[i]);
+  }
+  return out;
 }
 
 // 口形マッピングのカバレッジを再計算して警告表示を更新する

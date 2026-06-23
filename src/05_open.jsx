@@ -2,7 +2,7 @@
 // 共通定数
 // ════════════════════════════════════════════════════════════════
 var BUTTON_HEIGHT = 24;
-var EMO_VERSION = "2.4.0";
+var EMO_VERSION = "2.4.1";
 var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
 var BLINK_SIGNATURE = "emoBlinkAuto";
 
