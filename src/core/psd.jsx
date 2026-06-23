@@ -583,3 +583,35 @@ function extendStageComps(rootComp, targetDuration) {
   }
   return result;
 }
+
+// 選択レイヤーと、その参照先コンポ（＋配下のネストコンポ）の尺を伸ばす。
+// 各選択レイヤーの outPoint を targetDuration まで伸ばし（縮めない）、レイヤーが
+// コンポを参照していれば extendStageComps でそのコンポ階層も伸ばす。
+// 戻り値: { layers: outPoint を伸ばしたレイヤー数, comps: 尺を伸ばしたコンポ数, scanned: 走査コンポ数 }
+function extendSelectedLayers(layers, targetDuration) {
+  var result = { layers: 0, comps: 0, scanned: 0 };
+  if (!layers || !(targetDuration > 0)) return result;
+  var seen = {};
+  for (var i = 0; i < layers.length; i++) {
+    var layer = layers[i];
+    if (!layer) continue;
+    try {
+      if (layer.outPoint < targetDuration) {
+        layer.outPoint = targetDuration;
+        result.layers++;
+      }
+    } catch (eOut) {}
+    var src = null;
+    try {
+      src = layer.source;
+    } catch (eSrc) {}
+    if (src && src instanceof CompItem && !seen[src.id]) {
+      seen[src.id] = true;
+      var sub = extendStageComps(src, targetDuration);
+      result.layers += sub.layers;
+      result.comps += sub.comps;
+      result.scanned += sub.scanned;
+    }
+  }
+  return result;
+}
