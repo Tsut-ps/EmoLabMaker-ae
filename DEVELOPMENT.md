@@ -79,13 +79,42 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 
 1. **`src/` の該当ファイルを編集**（`dist/` は触らない。生成物）。
 2. `node build.js` で再生成。
-3. 構文チェック: `node --check dist/EmoLabMaker.jsx`。
+3. 構文チェック: `dist/EmoLabMaker.jsx` を `.js` にコピーして `node --check`
+   （Node によっては `.jsx` 拡張子を直接 check できないため）。
 4. After Effects の ScriptUI Panels に `dist/EmoLabMaker.jsx` を置いて動作確認。
 
 > [!NOTE]
 > `src/*.jsx` は連結後に同一クロージャへ入る前提なので、エディタで開くと
 > 共有変数（`win` / `tabs` 等）に「未定義」警告が出ます。これは**構文エラーではなく**、
 > ビルド後の `dist/EmoLabMaker.jsx` では解決されます。
+
+## コーディング規約（ExtendScript / ES3）
+
+After Effects の ExtendScript は ES3 相当。次を守ります。
+
+- `var` のみ（`const` / `let` / アロー関数 / モダン配列メソッドは不可）。
+- ネストした三項演算子は避ける（誤評価することがある）。`if/else` で書く。
+- レイヤー名に `,`（カンマ）を使わない。マーカーの「表示中レイヤー名の集合」が
+  カンマ区切りのため、含まれると壊れます。
+
+## 検証（テスト）
+
+AE 実機が無くても、UI 非依存ロジック（`core/*`）はモック AE 環境で検証できます。
+
+- 構文チェック: 上記のとおり `.js` にコピーして `node --check`。
+- 純ロジックテスト: 関数を抽出し、モック AE（CompItem / レイヤー / マーカー）上で
+  評価する Node スクリプトで assert する。`dist` を読むので先に `node build.js`。
+  （テストハーネスの場所・件数など運用メモは [docs/status.md](docs/status.md) を参照）
+
+## バージョニング
+
+セマンティック風 `x.y.z`（x=破壊的 / y=機能追加 / z=修正）。版を上げるときは次の 3 箇所を更新します。
+
+- `src/01_version.jsx` の `EMO_VERSION`
+- `src/00_header.jsx` の `@version`
+- `CHANGELOG.md`（先頭に追記）
+
+`EMO_VERSION` を独立ファイルにしているのは、版上げ時の差分を小さく保つためです。
 
 ## リリース
 
@@ -102,3 +131,31 @@ git push origin v2.0.3
 
 > リポジトリ Settings → Actions → Workflow permissions を **Read and write** に
 > しておくと確実です（`permissions: contents: write` も明記済み）。
+
+## 設計メモ（背景・不変条件）
+
+### PSDToolKit の仕様（調査結果）
+
+- **レイヤー命名規則**
+  - `*` prefix: 兄弟レイヤー間で排他表示(ラジオボタン)
+  - `!` prefix: 強制表示(常に表示、非表示にできない)
+  - `:flipx` / `:flipy` suffix: 左右/上下反転バリエーション
+- **口パク あいうえお@PSD**: lab ファイルの母音タイミングで あ/い/う/え/お/ん の6口形状を切替。子音は基本「ん(閉じ)」扱い
+- **目パチ@PSD**: 間隔・速度パラメータで自動まばたき
+
+参考: [PSDTool マニュアル](https://oov.github.io/psdtool/manual.html) /
+[PSD アニメーション効果](https://oov.github.io/aviutl_psdtoolkit/psd.html) /
+[準備オブジェクト](https://oov.github.io/aviutl_psdtoolkit/prep.html)
+
+### 不変条件
+
+- **単一 `.jsx` を継続**（CEP / UXP 化しない）。AE は PSD をネイティブインポートでき
+  （レイヤー名・構造・表示状態を保持）、CEP は更新終了・UXP は AE 未対応。単一ファイル配布が
+  動画制作者層に合う。UXP の AE 対応が出たら再検討。
+- **PSD 読み込みはスクリプトでやらない**（`importFile()` を呼ばない）。AE 標準の「コンポジション」
+  インポートに任せ、スクリプトは読み込み済みコンポの解析・登録・更新のみ行う。
+- **セットアップは冪等**（再実行＝既存を壊さず差分更新）。
+- **コンポ名の一意化**: グループコンポを `<ルート名>_<グループ名>` にリネーム。式が `comp("名前")` で
+  グローバル参照するため、同名コンポの衝突を避ける。
+- **式のシグネチャ**: emo=`emo2layerCtrlMarker` / 口パク=`lab2layerPhonemeMap` / 目パチ=`emoBlinkAuto`。
+- **マーカー＝表示中レイヤー名の集合**（カンマ区切り）。ラジオ(`*`)も任意(無印)も同じモデルで扱う。

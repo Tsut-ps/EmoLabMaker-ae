@@ -2,7 +2,7 @@
 
 このファイルは「いま何が出来ていて・何が残っていて・どんなルールで開発するか」を
 1 枚にまとめた最新の引き継ぎ資料。新しいセッションを始めるときは**まずこれを読む**。
-（ビルドの詳細は [DEVELOPMENT.md](../DEVELOPMENT.md) を参照）
+（恒久的な開発ルール・ビルド・設計メモは [DEVELOPMENT.md](../DEVELOPMENT.md) を参照）
 
 - 現行バージョン: **2.8.3**
 - 開発ブランチ: **`claude/psdtoolkit-compatibility-plan-qbn4fy`**
@@ -62,43 +62,17 @@
 
 ---
 
-## 3. ローカルルール
+## 3. 検証メモ（セッション固有）
 
-### ソース構成・ビルド
-- **単一配布 `.jsx`** を `src/` の分割ファイルから `build.js` で連結生成する。出力は
-  **`dist/EmoLabMaker.jsx`**（`.gitignore` 済み・コミットしない）。
-- ビルド: `node build.js`
-- 連結順（`build.js` の BODY）:
-  `00_header.jsx`(IIFE外) → IIFE_OPEN → `01_version` `05_open`
-  `core/layers` `core/expressions` `core/markers` `core/emoset` `core/lab` `core/psd`
-  `core/blink` `core/stage-model` `ui/scriptui` `ui/dialogs` `tabs/lab` `tabs/psd`
-  `tabs/stage` `99_close` → IIFE_CLOSE。BODY は build.js が +2 スペース字下げして整形する。
-- 役割: `core/` = UI 非依存ロジック（テスト可能） / `ui/` = ScriptUI 部品・ダイアログ /
-  `tabs/` = 各タブの UI 構築とイベント / `00`,`01`,`05`,`99` = IIFE の枠・共有定数・初期化。
+恒久的な開発ルール（ソース構成・ビルド・ES3 制約・バージョニング・リリース・設計メモ）は
+[DEVELOPMENT.md](../DEVELOPMENT.md) に集約。ここには一時的な運用メモだけ残す。
 
-### ExtendScript 制約（ES3）
-- `var` のみ。**`const` / `let` / アロー関数 / モダン配列メソッド禁止**。
-- **ネスト三項演算子は避ける**（ExtendScript が誤評価する）。`if/else` で書く。
-- レイヤー名に **カンマ `,` を使わない**（マーカーの「表示中集合」がカンマ区切りのため）。
-
-### 検証（AE 実機は使えない）
-- 構文チェック: `dist/EmoLabMaker.jsx` を `.js` にコピーして `node --check`（`.jsx` は直接不可）。
 - テストハーネス: **`/tmp/test_emolab.js`**（現在 **319 件** passing）。`dist` を読むので
   先に `node build.js`。実行: `node /tmp/test_emolab.js`。
-  - ⚠ **重要**: このテストは `/tmp` にあり**リポジトリ外**。新しいコンテナでは消える可能性が高い。
-    無ければ前セッションの内容から作り直すか、ユーザーに確認すること（リポジトリ化の検討余地あり）。
+  - ⚠ `/tmp` にあり**リポジトリ外**。新しいコンテナでは消える可能性が高い。無ければ前セッションの
+    内容から作り直すか、ユーザーに確認すること（リポジトリ化の検討余地あり）。
   - `mockLayer(name, enabled, source, expr)` は expr 対応済み。
     `isManagedStageLayer` / `isRegistered` / `hasOpacitySignature` は抽出済み。
-
-### バージョニング
-- セマンティック風 `x.y.z`（x=破壊的 / y=機能追加 / z=修正）。
-- 上げる場所は **3 箇所**: `src/01_version.jsx`(`EMO_VERSION`) ＋ `src/00_header.jsx`(`@version`)
-  ＋ `CHANGELOG.md`（先頭に追記）。
-- `EMO_VERSION` を独立ファイルにしているのは、版上げ時の差分・コンテキスト消費を小さく保つため。
-
-### リリース
-- `.github/workflows/release.yml` が `v*` タグ push（または手動 dispatch）で `node build.js` →
-  `dist/EmoLabMaker.jsx` を Release に添付する。
 
 ---
 
@@ -118,35 +92,3 @@
 - v2.8.1 立ち絵タブの同期・起動を軽量化
 - v2.8.0 パネル全体を少しコンパクト化
 - v2.7.0 「音素を選択」を一般音素ベース＋追加方式に刷新
-
----
-
-## 5. 設計メモ（背景・不変条件）
-
-旧 `psdtoolkit-compatibility-plan.md` から、今も有効な前提だけを抜粋。
-
-### PSDToolKit の仕様（調査結果）
-
-- **レイヤー命名規則**
-  - `*` prefix: 兄弟レイヤー間で排他表示(ラジオボタン)
-  - `!` prefix: 強制表示(常に表示、非表示にできない)
-  - `:flipx` / `:flipy` suffix: 左右/上下反転バリエーション
-- **口パク あいうえお@PSD**: lab ファイルの母音タイミングで あ/い/う/え/お/ん の6口形状を切替。子音は基本「ん(閉じ)」扱い
-- **目パチ@PSD**: 間隔・速度パラメータで自動まばたき
-
-参考: [PSDTool マニュアル](https://oov.github.io/psdtool/manual.html) /
-[PSD アニメーション効果](https://oov.github.io/aviutl_psdtoolkit/psd.html) /
-[準備オブジェクト](https://oov.github.io/aviutl_psdtoolkit/prep.html)
-
-### 不変条件
-
-- **単一 `.jsx` を継続**（CEP / UXP 化しない）。AE は PSD をネイティブインポートでき
-  （レイヤー名・構造・表示状態を保持）、CEP は更新終了・UXP は AE 未対応。単一ファイル配布が
-  動画制作者層に合う。UXP の AE 対応が出たら再検討。
-- **PSD 読み込みはスクリプトでやらない**（`importFile()` を呼ばない）。AE 標準の「コンポジション」
-  インポートに任せ、スクリプトは読み込み済みコンポの解析・登録・更新のみ行う。
-- **セットアップは冪等**（再実行＝既存を壊さず差分更新）。
-- **コンポ名の一意化**: グループコンポを `<ルート名>_<グループ名>` にリネーム。式が `comp("名前")` で
-  グローバル参照するため、同名コンポの衝突を避ける。
-- **式のシグネチャ**: emo=`emo2layerCtrlMarker` / 口パク=`lab2layerPhonemeMap` / 目パチ=`emoBlinkAuto`。
-- **マーカー＝表示中レイヤー名の集合**（カンマ区切り）。ラジオ(`*`)も任意(無印)も同じモデルで扱う。
