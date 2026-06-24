@@ -2,8 +2,7 @@
 
 このファイルは「いま何が出来ていて・何が残っていて・どんなルールで開発するか」を
 1 枚にまとめた最新の引き継ぎ資料。新しいセッションを始めるときは**まずこれを読む**。
-（設計の経緯・ビルドの詳細は [DEVELOPMENT.md](../DEVELOPMENT.md) と
-[docs/psdtoolkit-compatibility-plan.md](psdtoolkit-compatibility-plan.md) を参照）
+（ビルドの詳細は [DEVELOPMENT.md](../DEVELOPMENT.md) を参照）
 
 - 現行バージョン: **2.8.3**
 - 開発ブランチ: **`claude/psdtoolkit-compatibility-plan-qbn4fy`**
@@ -63,11 +62,11 @@
 
 ---
 
-## 3. ローカルルール（厳守）
+## 3. ローカルルール
 
 ### ソース構成・ビルド
 - **単一配布 `.jsx`** を `src/` の分割ファイルから `build.js` で連結生成する。出力は
-  **`dist/EmoLabMaker.jsx`**（`.gitignore` 済み・**絶対にコミットしない**）。
+  **`dist/EmoLabMaker.jsx`**（`.gitignore` 済み・コミットしない）。
 - ビルド: `node build.js`
 - 連結順（`build.js` の BODY）:
   `00_header.jsx`(IIFE外) → IIFE_OPEN → `01_version` `05_open`
@@ -79,7 +78,7 @@
 
 ### ExtendScript 制約（ES3）
 - `var` のみ。**`const` / `let` / アロー関数 / モダン配列メソッド禁止**。
-- **ネスト三項演算子は禁止**（ExtendScript が誤評価する）。必ず `if/else` で書く。
+- **ネスト三項演算子は避ける**（ExtendScript が誤評価する）。`if/else` で書く。
 - レイヤー名に **カンマ `,` を使わない**（マーカーの「表示中集合」がカンマ区切りのため）。
 
 ### 検証（AE 実機は使えない）
@@ -96,11 +95,6 @@
 - 上げる場所は **3 箇所**: `src/01_version.jsx`(`EMO_VERSION`) ＋ `src/00_header.jsx`(`@version`)
   ＋ `CHANGELOG.md`（先頭に追記）。
 - `EMO_VERSION` を独立ファイルにしているのは、版上げ時の差分・コンテキスト消費を小さく保つため。
-
-### Git
-- push 前に `git fetch` でリモートとの乖離を確認（ユーザーが README 等を直接コミットすることがある）。
-  乖離があれば rebase してから push。
-- 生成物 `dist/` はコミットしない。
 
 ### リリース
 - `.github/workflows/release.yml` が `v*` タグ push（または手動 dispatch）で `node build.js` →
@@ -124,3 +118,20 @@
 - v2.8.1 立ち絵タブの同期・起動を軽量化
 - v2.8.0 パネル全体を少しコンパクト化
 - v2.7.0 「音素を選択」を一般音素ベース＋追加方式に刷新
+
+---
+
+## 5. 設計メモ（背景・不変条件）
+
+旧 `psdtoolkit-compatibility-plan.md` から、今も有効な前提だけを抜粋。
+
+- **単一 `.jsx` を継続**（CEP / UXP 化しない）。AE は PSD をネイティブインポートでき
+  （レイヤー名・構造・表示状態を保持）、CEP は更新終了・UXP は AE 未対応。単一ファイル配布が
+  動画制作者層に合う。UXP の AE 対応が出たら再検討。
+- **PSD 読み込みはスクリプトでやらない**（`importFile()` を呼ばない）。AE 標準の「コンポジション」
+  インポートに任せ、スクリプトは読み込み済みコンポの解析・登録・更新のみ行う。
+- **セットアップは冪等**（再実行＝既存を壊さず差分更新）。
+- **コンポ名の一意化**: グループコンポを `<ルート名>_<グループ名>` にリネーム。式が `comp("名前")` で
+  グローバル参照するため、同名コンポの衝突を避ける。
+- **式のシグネチャ**: emo=`emo2layerCtrlMarker` / 口パク=`lab2layerPhonemeMap` / 目パチ=`emoBlinkAuto`。
+- **マーカー＝表示中レイヤー名の集合**（カンマ区切り）。ラジオ(`*`)も任意(無印)も同じモデルで扱う。
