@@ -804,11 +804,25 @@ function resolveStageState() {
   computeStageActive(stageNodes);
 }
 
+// 構造（prefix・表示名・親子・制御コンポ）は変えず、時刻依存の状態だけ再解決する
+// 軽量版。再生ヘッド追従やクリック後の同期は構造が不変なので、prefix 計算
+// （detectDominantPrefix など）や displayName の作り直しを省いてマーカー読みだけ行う。
+// 事前に一度 resolveStageState（フル）が走っていること（ctrlComp/parent が設定済み）が前提。
+function resolveStageVisibleState() {
+  for (var i = 0; i < stageNodes.length; i++) {
+    var nd = stageNodes[i];
+    nd.visibleSet = nd.ctrlComp
+      ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
+      : [];
+  }
+  computeStageActive(stageNodes);
+}
+
 // コントロールを作り直さず、チェック状態と有効/無効だけ現在時刻に合わせて更新する。
 // （再生ヘッド追従＆クリック後の軽量反映。作り直さないので「2回クリック」問題も再生負荷も回避）
 function syncStageControls() {
   if (!stageNodes || stageNodes.length === 0) return;
-  resolveStageState();
+  resolveStageVisibleState();
   for (var i = 0; i < stageButtons.length; i++) {
     var e = stageButtons[i];
     try {

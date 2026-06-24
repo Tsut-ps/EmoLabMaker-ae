@@ -56,7 +56,10 @@ if (win instanceof Window) {
 
 // ウィンドウが実体化してサイズが確定してから、スクロール枠を測り直す
 // （init 時点では win.size が未確定で、口パク枠などが初期表示で崩れるため）。
+// 立ち絵ツリーは init で構築済みなので、ここでは正しい幅での再描画＋スクロール
+// 再フィット（rebuildStageTree）だけ行う。buildStageNodes の再走査・全マーカー
+// 読み直し（refreshStage）はしない（起動時のツリー走査・読み込みを1回で済ます）。
 try {
-  refreshStage(false);
+  rebuildStageTree();
   refreshMouthScroll();
 } catch (eInit) {}
