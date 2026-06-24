@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════════
 // 共通定数
 // ════════════════════════════════════════════════════════════════
-var BUTTON_HEIGHT = 24;
+var BUTTON_HEIGHT = 20;
 var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
 var BLINK_SIGNATURE = "emoBlinkAuto";
 
@@ -286,23 +286,23 @@ var tabLab = tabs.add("tab", undefined, "口パク");
 var tabBlink = tabs.add("tab", undefined, "目パチ");
 tabBlink.orientation = "column";
 tabBlink.alignChildren = ["fill", "top"];
-tabBlink.spacing = 8;
-tabBlink.margins = 8;
+tabBlink.spacing = 6;
+tabBlink.margins = 6;
 
 tabLab.orientation = "column";
 tabLab.alignChildren = ["fill", "top"];
-tabLab.spacing = 8;
-tabLab.margins = 8;
+tabLab.spacing = 6;
+tabLab.margins = 6;
 
 tabPsd.orientation = "column";
 tabPsd.alignChildren = ["fill", "top"];
-tabPsd.spacing = 8;
-tabPsd.margins = 8;
+tabPsd.spacing = 6;
+tabPsd.margins = 6;
 
 tabStage.orientation = "column";
 tabStage.alignChildren = ["fill", "top"];
-tabStage.spacing = 8;
-tabStage.margins = 8;
+tabStage.spacing = 6;
+tabStage.margins = 6;
 
 // 並びは PSD が先頭だが、日常のハブである立ち絵を初期選択にする
 tabs.selection = tabStage;

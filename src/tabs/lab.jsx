@@ -11,7 +11,7 @@ labPanel.orientation = "column";
 labPanel.alignChildren = ["fill", "top"];
 labPanel.alignment = ["fill", "top"];
 labPanel.spacing = 5;
-labPanel.margins = 10;
+labPanel.margins = 8;
 
 // ========== ファイル選択グループ ==========
 var fileSelectGroup = labPanel.add("group");
@@ -26,7 +26,7 @@ filePathText.alignment = ["fill", "center"];
 filePathText.enabled = false;
 
 var browseBtn = fileSelectGroup.add("button", undefined, "...");
-browseBtn.preferredSize = [30, 25];
+browseBtn.preferredSize = [30, BUTTON_HEIGHT];
 browseBtn.alignment = ["right", "center"];
 browseBtn.helpTip = "labファイルを選択";
 
@@ -40,7 +40,7 @@ bulkPanel.orientation = "column";
 bulkPanel.alignChildren = ["fill", "top"];
 bulkPanel.alignment = ["fill", "top"];
 bulkPanel.spacing = 4;
-bulkPanel.margins = 10;
+bulkPanel.margins = 8;
 
 var bulkOptRow = bulkPanel.add("group");
 bulkOptRow.orientation = "row";
@@ -292,8 +292,8 @@ phonemeListPanel.orientation = "column";
 phonemeListPanel.alignChildren = ["fill", "top"];
 phonemeListPanel.alignment = ["fill", "top"];
 phonemeListPanel.spacing = 5;
-phonemeListPanel.margins = 10;
-phonemeListPanel.minimumSize = [200, 150];
+phonemeListPanel.margins = 8;
+phonemeListPanel.minimumSize = [200, 130];
 
 // ========== 音素チェックボックス ==========
 var phonemeCheckboxGroup = phonemeListPanel.add("group");
@@ -437,17 +437,17 @@ var offsetInput = offsetGroup.add(
   undefined,
   String(cfgLabOffsetMs),
 );
-offsetInput.preferredSize = [48, 25];
+offsetInput.preferredSize = [48, BUTTON_HEIGHT];
 offsetInput.helpTip =
   "動画先行の法則: 映像は音声より数フレーム速いほうが自然に見えます（負の値=映像先行）。全マーカーを一律シフト";
 
 var frameMinus = offsetGroup.add("button", undefined, "<");
-frameMinus.preferredSize = [30, 25];
+frameMinus.preferredSize = [30, BUTTON_HEIGHT];
 frameMinus.alignment = ["left", "center"];
 frameMinus.helpTip = "1フレーム戻す（映像をさらに先行）";
 
 var framePlus = offsetGroup.add("button", undefined, ">");
-framePlus.preferredSize = [30, 25];
+framePlus.preferredSize = [30, BUTTON_HEIGHT];
 framePlus.alignment = ["left", "center"];
 framePlus.helpTip = "1フレーム進める";
 
@@ -504,7 +504,7 @@ mouthMapPanel.orientation = "column";
 mouthMapPanel.alignChildren = ["fill", "top"];
 mouthMapPanel.alignment = ["fill", "top"];
 mouthMapPanel.spacing = 4;
-mouthMapPanel.margins = 10;
+mouthMapPanel.margins = 8;
 
 var mouthMapHint = mouthMapPanel.add(
   "statictext",
@@ -528,7 +528,7 @@ mouthLabTagInput.helpTip =
 // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
 // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)。
 // 口パクは固定高さ + スクロールバー（リサイズ・追加で壊れないシンプル方式）。
-var MOUTH_SCROLL_H = 150;
+var MOUTH_SCROLL_H = 130;
 var mouthRowsClip = mouthMapPanel.add("panel");
 mouthRowsClip.alignment = ["fill", "top"];
 mouthRowsClip.margins = 2;

@@ -12,9 +12,9 @@ var EXPR_SIGNATURE = "emo2layerCtrlMarker";
 var LABEL_WIDTH = 40;
 var DROPDOWN_MIN_W = 140;
 var GRID_MIN_BTN_W = 60;
-var GRID_SPACING = 6;
+var GRID_SPACING = 5;
 var MARKER_EPSILON = 0.0001;
-var PANEL_MARGIN = 8;
+var PANEL_MARGIN = 6;
 
 // ══════════════════════════════════════════════════════════════════
 // コンポ ユーティリティ

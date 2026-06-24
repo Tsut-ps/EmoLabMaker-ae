@@ -71,7 +71,7 @@ var psdPrefixPanel = tabPsd.add("panel", undefined, "命名ショートカット
 psdPrefixPanel.orientation = "column";
 psdPrefixPanel.alignChildren = ["fill", "top"];
 psdPrefixPanel.alignment = ["fill", "top"];
-psdPrefixPanel.margins = 10;
+psdPrefixPanel.margins = 8;
 psdPrefixPanel.spacing = 4;
 var psdPrefixHint = psdPrefixPanel.add(
   "statictext",
@@ -150,7 +150,7 @@ var psdExtendPanel = tabPsd.add("panel", undefined, "尺を伸ばす（選択）
 psdExtendPanel.orientation = "column";
 psdExtendPanel.alignChildren = ["fill", "top"];
 psdExtendPanel.alignment = ["fill", "top"];
-psdExtendPanel.margins = 10;
+psdExtendPanel.margins = 8;
 psdExtendPanel.spacing = 4;
 var psdExtendHint = psdExtendPanel.add(
   "statictext",
@@ -234,7 +234,7 @@ blinkPanel.orientation = "column";
 blinkPanel.alignChildren = ["fill", "top"];
 blinkPanel.alignment = ["fill", "top"];
 blinkPanel.spacing = 4;
-blinkPanel.margins = 10;
+blinkPanel.margins = 8;
 
 var BLINK_ROLES = [
   { key: "open", label: "開き目" },
@@ -543,7 +543,7 @@ settingsPanel.orientation = "column";
 settingsPanel.alignChildren = ["left", "top"];
 settingsPanel.alignment = ["fill", "bottom"];
 settingsPanel.spacing = 4;
-settingsPanel.margins = 10;
+settingsPanel.margins = 8;
 
 var cbFollow = settingsPanel.add(
   "checkbox",
