@@ -125,6 +125,21 @@
 
 旧 `psdtoolkit-compatibility-plan.md` から、今も有効な前提だけを抜粋。
 
+### PSDToolKit の仕様（調査結果）
+
+- **レイヤー命名規則**
+  - `*` prefix: 兄弟レイヤー間で排他表示(ラジオボタン)
+  - `!` prefix: 強制表示(常に表示、非表示にできない)
+  - `:flipx` / `:flipy` suffix: 左右/上下反転バリエーション
+- **口パク あいうえお@PSD**: lab ファイルの母音タイミングで あ/い/う/え/お/ん の6口形状を切替。子音は基本「ん(閉じ)」扱い
+- **目パチ@PSD**: 間隔・速度パラメータで自動まばたき
+
+参考: [PSDTool マニュアル](https://oov.github.io/psdtool/manual.html) /
+[PSD アニメーション効果](https://oov.github.io/aviutl_psdtoolkit/psd.html) /
+[準備オブジェクト](https://oov.github.io/aviutl_psdtoolkit/prep.html)
+
+### 不変条件
+
 - **単一 `.jsx` を継続**（CEP / UXP 化しない）。AE は PSD をネイティブインポートでき
   （レイヤー名・構造・表示状態を保持）、CEP は更新終了・UXP は AE 未対応。単一ファイル配布が
   動画制作者層に合う。UXP の AE 対応が出たら再検討。
