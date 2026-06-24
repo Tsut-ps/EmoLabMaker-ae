@@ -1,6 +1,6 @@
 ﻿/**
  * EmoLabMaker.jsx
- * @version 2.8.3
+ * @version 2.9.0
  * @description セットアップ + 立ち絵 + 口パク + 目パチ 統合パネル（PSDToolKit互換）
  *   Tab "セットアップ" : PSDToolKit 命名規則 (* / ! / 無印) の立ち絵 PSD から表情切替を自動セットアップ
  *   Tab "立ち絵" : 立ち絵の階層（目/口/服…）をまとめて表示し、各階層を独立に切り替える(日常のハブ)

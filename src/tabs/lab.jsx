@@ -289,21 +289,27 @@ bulkSiblingBtn.onClick = function () {
   );
 };
 
-// ========== 音素リストグループ ==========
-var phonemeListPanel = labPanel.add("panel", undefined, "音素を選択");
-phonemeListPanel.orientation = "column";
-phonemeListPanel.alignChildren = ["fill", "top"];
-phonemeListPanel.alignment = ["fill", "top"];
-phonemeListPanel.spacing = 5;
-phonemeListPanel.margins = 8;
-phonemeListPanel.minimumSize = [200, 130];
+// ========== 音素を選択（ボタン → モーダルダイアログ） ==========
+// 以前はインラインのチェックボックス一覧だったが、パネルを圧迫するためダイアログ化。
+// 選択状態は widget の外（phonemeChecked）に永続化し、候補一覧（phonemeCandidates）と
+// あわせてダイアログを開くたびに再描画、OK で書き戻す（Cancel で破棄）。
+var phonemeSelectRow = labPanel.add("group");
+phonemeSelectRow.orientation = "row";
+phonemeSelectRow.alignment = ["fill", "top"];
+phonemeSelectRow.alignChildren = ["left", "center"];
+phonemeSelectRow.spacing = 6;
 
-// ========== 音素チェックボックス ==========
-var phonemeCheckboxGroup = phonemeListPanel.add("group");
-phonemeCheckboxGroup.orientation = "column";
-phonemeCheckboxGroup.alignChildren = ["fill", "top"];
-phonemeCheckboxGroup.alignment = ["fill", "fill"];
-phonemeCheckboxGroup.spacing = 2;
+var phonemeSelectBtn = phonemeSelectRow.add("button", undefined, "音素を選択…");
+phonemeSelectBtn.preferredSize = [96, BUTTON_HEIGHT];
+phonemeSelectBtn.helpTip =
+  "配置する音素をチェックで選びます（母音+ん/子音/すべて 等）";
+
+var phonemeSummaryText = phonemeSelectRow.add(
+  "statictext",
+  undefined,
+  "選択: （なし）",
+);
+phonemeSummaryText.alignment = ["fill", "center"];
 
 // 母音
 // a, i, u, e, o - 基本母音5つ
@@ -353,10 +359,12 @@ var CONSONANT_PHONEMES = [
 // よく使う・口形を付けやすい子音に絞る（多すぎ防止。残りは「子音」ボタンで追加可能）。
 var RECOMMENDED_CONSONANTS = ["k", "s", "t", "n", "h", "m", "r", "w"];
 
-var phonemeData = [];
+// 選択状態は widget の外に持つ（ダイアログ開閉で widget は作り直されるため）。
+var phonemeChecked = {}; // 音素名 → bool（チェック状態）
+var phonemeCandidates = []; // [{phoneme, count, data}]（buildMergedPhonemeList の結果）
 var labFile = null;
 var labFileEntries = []; // 直近に読み込んだ lab の音素＋出現回数（確認表示用）
-var extraPhonemes = []; // ユーザーが「追加」した音素（baseline に上乗せ）
+var extraPhonemes = []; // 予約: baseline に上乗せする追加音素（現状は未使用）
 
 // 発話終了時に打つ「閉じ音素」。どの母音にも属さない pau を使い、閉じ口へ戻す。
 var LAB_CLOSE_PHONEME = "pau";
@@ -366,68 +374,192 @@ function baselinePhonemes() {
   return commonPhonemes.concat(RECOMMENDED_CONSONANTS).concat(extraPhonemes);
 }
 
-function setPhonemeSelection(selector) {
-  for (var i = 0; i < phonemeData.length; i++) {
-    phonemeData[i].checkbox.value = selector(phonemeData[i]);
+// 候補一覧 (list=[{phoneme,count,data}]) を取り込み、選択状態を更新する。
+// 既存のチェックは維持し、新規候補は母音+ん(common)を既定チェックにする。
+function setPhonemeCandidates(list) {
+  phonemeCandidates = list;
+  var hasFile = false;
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].count > 0) hasFile = true;
+    var name = list[i].phoneme;
+    if (!phonemeChecked.hasOwnProperty(name)) {
+      phonemeChecked[name] = isCommonPhoneme(name);
+    }
   }
+  createBtn.enabled = hasFile; // ファイルに音素があるときだけ「音素配置」可
+  updatePhonemeSummary();
   refreshMouthCoverage();
 }
 
-// ══════════════════════════════════════════════════════════════════
-// 口パク エクスプレッション
-// ══════════════════════════════════════════════════════════════════
+// baseline（最初から出す一般音素）＋ 直近 lab をマージして候補を再構築
+function refreshPhonemeChecklist() {
+  setPhonemeCandidates(
+    buildMergedPhonemeList(labFileEntries, baselinePhonemes()),
+  );
+}
 
-// ========== 一括選択ボタングループ ==========
-var phonemeSelectorGroup = phonemeListPanel.add("group");
-phonemeSelectorGroup.orientation = "row";
-phonemeSelectorGroup.alignment = ["fill", "bottom"];
-phonemeSelectorGroup.alignChildren = ["fill", "center"];
-phonemeSelectorGroup.spacing = 5;
-
-var selectAllBtn = phonemeSelectorGroup.add("button", undefined, "すべて");
-selectAllBtn.alignment = ["fill", "center"];
-selectAllBtn.preferredSize.height = BUTTON_HEIGHT;
-var selectCommonBtn = phonemeSelectorGroup.add("button", undefined, "母音+ん");
-selectCommonBtn.alignment = ["fill", "center"];
-selectCommonBtn.preferredSize.height = BUTTON_HEIGHT;
-selectCommonBtn.helpTip = "母音・ん・無音/閉じ系を選択（基本はこれでOK）";
-var selectConsonantBtn = phonemeSelectorGroup.add("button", undefined, "子音");
-selectConsonantBtn.alignment = ["fill", "center"];
-selectConsonantBtn.preferredSize.height = BUTTON_HEIGHT;
-selectConsonantBtn.helpTip =
-  "ファイル内の子音(k/s/t…)も追加でチェック（より細かい口の動き）";
-var deselectAllBtn = phonemeSelectorGroup.add("button", undefined, "解除");
-deselectAllBtn.alignment = ["fill", "center"];
-deselectAllBtn.preferredSize.height = BUTTON_HEIGHT;
-
-// ========== 足りない音素を追加（一覧に無い音素を候補に足す） ==========
-var phonemeAddRow = phonemeListPanel.add("group");
-phonemeAddRow.orientation = "row";
-phonemeAddRow.alignment = ["fill", "top"];
-phonemeAddRow.alignChildren = ["left", "center"];
-phonemeAddRow.spacing = 4;
-phonemeAddRow.add("statictext", undefined, "追加:");
-var phonemeAddInput = phonemeAddRow.add("edittext", undefined, "");
-phonemeAddInput.preferredSize = [120, BUTTON_HEIGHT];
-phonemeAddInput.helpTip =
-  "一覧に無い音素を候補に追加（カンマ区切り可）。ファイルに無い音素は淡色で表示";
-var phonemeAddBtn = phonemeAddRow.add("button", undefined, "＋");
-phonemeAddBtn.preferredSize = [32, BUTTON_HEIGHT];
-phonemeAddBtn.onClick = function () {
-  var toks = normalizeCsvTokens(phonemeAddInput.text);
-  var added = 0;
-  for (var i = 0; i < toks.length; i++) {
-    var p = toks[i];
-    if (indexOfName(baselinePhonemes(), p) < 0 && indexOfName(extraPhonemes, p) < 0) {
-      extraPhonemes.push(p);
-      added++;
+// 選択中サマリ（例: "選択: a,i,u,e,o,N (6)"）を更新
+function updatePhonemeSummary() {
+  if (!phonemeSummaryText) return; // UI 構築前のガード
+  var names = [];
+  for (var i = 0; i < phonemeCandidates.length; i++) {
+    if (phonemeChecked[phonemeCandidates[i].phoneme]) {
+      names.push(phonemeCandidates[i].phoneme);
     }
   }
-  if (added > 0) {
-    phonemeAddInput.text = "";
-    refreshPhonemeChecklist();
+  if (names.length === 0) {
+    phonemeSummaryText.text = "選択: （なし）";
+  } else {
+    var shown = names;
+    var suffix = "";
+    if (names.length > 8) {
+      shown = names.slice(0, 8);
+      suffix = "…";
+    }
+    phonemeSummaryText.text =
+      "選択: " + shown.join(",") + suffix + " (" + names.length + ")";
   }
-};
+  try {
+    phonemeSelectRow.layout.layout(true);
+  } catch (e) {}
+}
+
+// 選択した音素を、一括読み込みの「音素:」欄に無ければ自動追加する（#3）。
+// 欄が空（＝すべて）のときは全音素が対象なので何もしない（追加で逆に絞られるのを防ぐ）。
+function autoAddSelectedToBulk() {
+  var cur = normalizeCsvTokens(bulkPhonemeInput.text);
+  if (cur.length === 0) return; // 空＝すべて。追加不要
+  var seen = {};
+  var i;
+  for (i = 0; i < cur.length; i++) seen[cur[i]] = true;
+  var added = false;
+  for (i = 0; i < phonemeCandidates.length; i++) {
+    var name = phonemeCandidates[i].phoneme;
+    if (phonemeChecked[name] && !seen[name]) {
+      seen[name] = true;
+      cur.push(name);
+      added = true;
+    }
+  }
+  if (added) {
+    bulkPhonemeInput.text = cur.join(",");
+    cfgImportPhonemes = bulkPhonemeInput.text;
+    setSettingStr("importPhonemes", cfgImportPhonemes);
+  }
+}
+
+// 「音素を選択…」ダイアログ。phonemeCandidates + phonemeChecked から描画し、
+// OK で phonemeChecked へ書き戻す（Cancel で破棄）。lab 状態にアクセスするため
+// lab.jsx 内のクロージャで実装する。
+function openPhonemeDialog() {
+  if (phonemeCandidates.length === 0) {
+    alert("選択できる音素がありません。labファイルを読み込んでください。");
+    return;
+  }
+  var dlg = new Window("dialog", "音素を選択");
+  dlg.orientation = "column";
+  dlg.alignChildren = ["fill", "top"];
+  dlg.margins = 14;
+  dlg.spacing = 8;
+
+  dlg.add(
+    "statictext",
+    undefined,
+    "配置する音素をチェックしてください（ファイルにある音素は「a(3)」のように回数付き）:",
+  );
+
+  // チェックボックスを 3 列で並べる
+  var listGroup = dlg.add("group");
+  listGroup.orientation = "column";
+  listGroup.alignChildren = ["fill", "top"];
+  listGroup.spacing = 2;
+
+  var boxes = []; // [{checkbox, phoneme}]
+  var currentRow = null;
+  var colCount = 0;
+  for (var i = 0; i < phonemeCandidates.length; i++) {
+    var item = phonemeCandidates[i];
+    if (colCount === 0) {
+      currentRow = listGroup.add("group");
+      currentRow.orientation = "row";
+      currentRow.alignment = ["fill", "top"];
+      currentRow.alignChildren = ["left", "center"];
+      currentRow.spacing = 5;
+    }
+    var labelText =
+      item.count > 0 ? item.phoneme + "(" + item.count + ")" : item.phoneme;
+    var cb = currentRow.add("checkbox", undefined, labelText);
+    cb.value = !!phonemeChecked[item.phoneme];
+    cb.minimumSize.width = 64;
+    // ファイルに無い音素（baseline のみ）は淡色にして「候補」だと分かるように
+    if (item.count <= 0) setCheckColor(cb, [0.5, 0.5, 0.5, 1]);
+    cb.helpTip =
+      item.count > 0
+        ? "このファイルに " + item.count + " 回出現"
+        : "このファイルには含まれていません（一般音素として候補表示）";
+    boxes.push({ checkbox: cb, phoneme: item.phoneme });
+    colCount++;
+    if (colCount >= 3) colCount = 0;
+  }
+
+  // 一括選択ボタン（ダイアログ内のチェックを操作。OK まで本体には書き戻さない）
+  function selectInDialog(selector) {
+    for (var b = 0; b < boxes.length; b++) {
+      boxes[b].checkbox.value = selector(
+        boxes[b].phoneme,
+        boxes[b].checkbox.value,
+      );
+    }
+  }
+  var selRow = dlg.add("group");
+  selRow.orientation = "row";
+  selRow.alignChildren = ["fill", "center"];
+  selRow.spacing = 5;
+  var dAllBtn = selRow.add("button", undefined, "すべて");
+  var dCommonBtn = selRow.add("button", undefined, "母音+ん");
+  var dConsonantBtn = selRow.add("button", undefined, "子音");
+  var dNoneBtn = selRow.add("button", undefined, "解除");
+  dCommonBtn.helpTip = "母音・ん・無音/閉じ系を選択（基本はこれでOK）";
+  dConsonantBtn.helpTip = "子音(k/s/t…)も追加でチェック（より細かい口の動き）";
+  dAllBtn.onClick = function () {
+    selectInDialog(function () {
+      return true;
+    });
+  };
+  dNoneBtn.onClick = function () {
+    selectInDialog(function () {
+      return false;
+    });
+  };
+  dCommonBtn.onClick = function () {
+    selectInDialog(function (p) {
+      return isCommonPhoneme(p);
+    });
+  };
+  dConsonantBtn.onClick = function () {
+    selectInDialog(function (p, cur) {
+      return cur || isConsonantPhoneme(p);
+    });
+  };
+
+  var btnRow = dlg.add("group");
+  btnRow.orientation = "row";
+  btnRow.alignment = ["right", "top"];
+  btnRow.add("button", undefined, "OK", { name: "ok" });
+  btnRow.add("button", undefined, "キャンセル", { name: "cancel" });
+
+  if (dlg.show() !== 1) return;
+
+  // OK: ダイアログのチェックを本体へ書き戻す
+  for (var k = 0; k < boxes.length; k++) {
+    phonemeChecked[boxes[k].phoneme] = boxes[k].checkbox.value;
+  }
+  // 選択した音素を一括「音素:」欄へ自動追加（口パク設定側に無ければ足す）(#3)
+  autoAddSelectedToBulk();
+  updatePhonemeSummary();
+  refreshMouthCoverage();
+}
+phonemeSelectBtn.onClick = openPhonemeDialog;
 
 // ========== タイミング設定グループ（全て app.settings で永続化） ==========
 var offsetGroup = labPanel.add("group");
@@ -779,12 +911,10 @@ function collectUsedPhonemes() {
       out.push(p);
     }
   }
-  // lab 読込中: チェック中の音素
-  if (phonemeData && phonemeData.length > 0) {
-    for (i = 0; i < phonemeData.length; i++) {
-      if (phonemeData[i].checkbox && phonemeData[i].checkbox.value) {
-        add(phonemeData[i].phoneme);
-      }
+  // lab 読込中: チェック中の音素（widget の外に持つ phonemeChecked から）
+  for (i = 0; i < phonemeCandidates.length; i++) {
+    if (phonemeChecked[phonemeCandidates[i].phoneme]) {
+      add(phonemeCandidates[i].phoneme);
     }
   }
   // 一括読み込みの音素入力（＝使う音素のベースライン）も常に加える
@@ -1256,83 +1386,6 @@ framePlus.onClick = function () {
   adjustMarkersByFrames(1);
 };
 
-// チェックリストを (再)構築する。list = [{phoneme, count, data}]。
-// 既存のチェック状態は維持し、新規項目は母音+ん(common)を既定チェックにする。
-function rebuildPhonemeChecklist(list) {
-  // 既存のチェック状態を覚えておく（再構築でリセットしないため）
-  var prevChecked = {};
-  var k;
-  for (k = 0; k < phonemeData.length; k++) {
-    prevChecked[phonemeData[k].phoneme] = phonemeData[k].checkbox.value;
-  }
-
-  phonemeData = [];
-  for (k = phonemeCheckboxGroup.children.length - 1; k >= 0; k--) {
-    phonemeCheckboxGroup.remove(phonemeCheckboxGroup.children[k]);
-  }
-
-  var currentRow = null;
-  var colCount = 0;
-  var hasFile = false;
-  for (var i = 0; i < list.length; i++) {
-    var item = list[i];
-    if (item.count > 0) hasFile = true;
-
-    if (colCount === 0) {
-      currentRow = phonemeCheckboxGroup.add("group");
-      currentRow.orientation = "row";
-      currentRow.alignment = ["fill", "top"];
-      currentRow.alignChildren = ["fill", "center"];
-      currentRow.spacing = 5;
-    }
-
-    var itemGroup = currentRow.add("group");
-    itemGroup.orientation = "row";
-    itemGroup.alignment = ["fill", "center"];
-    itemGroup.alignChildren = ["left", "center"];
-    itemGroup.spacing = 2;
-
-    var cb = itemGroup.add("checkbox", undefined, "");
-    // 既存チェックは維持。新規は母音+ん を既定でON
-    cb.value =
-      prevChecked.hasOwnProperty(item.phoneme)
-        ? prevChecked[item.phoneme]
-        : isCommonPhoneme(item.phoneme);
-    cb.onClick = function () {
-      refreshMouthCoverage();
-    };
-
-    // 表示: ファイルにある音素は "k(3)"、baseline のみ(ファイルに無い)は "k" を淡色で
-    var labelText = item.count > 0 ? item.phoneme + "(" + item.count + ")" : item.phoneme;
-    var label = itemGroup.add("statictext", undefined, labelText);
-    label.minimumSize.width = 50;
-    if (item.count <= 0) setCheckColor(label, [0.5, 0.5, 0.5, 1]);
-    label.helpTip =
-      item.count > 0
-        ? "このファイルに " + item.count + " 回出現"
-        : "このファイルには含まれていません（一般音素として候補表示）";
-
-    phonemeData.push({ checkbox: cb, phoneme: item.phoneme, data: item.data });
-
-    colCount++;
-    if (colCount >= 3) colCount = 0;
-  }
-
-  try {
-    phonemeCheckboxGroup.layout.layout(true);
-    phonemeListPanel.layout.layout(true);
-  } catch (eL) {}
-  createBtn.enabled = hasFile; // 実際に配置できる（ファイルに音素がある）ときだけ有効
-  refreshMouthCoverage();
-}
-
-// baseline ＋ 直近 lab をマージして再構築
-function refreshPhonemeChecklist() {
-  rebuildPhonemeChecklist(
-    buildMergedPhonemeList(labFileEntries, baselinePhonemes()),
-  );
-}
-
 // ファイル選択
 browseBtn.onClick = function () {
   labFile = File.openDialog("labファイルを選択", "*.lab");
@@ -1354,34 +1407,6 @@ browseBtn.onClick = function () {
   } catch (eW) {}
 };
 
-// 全選択
-selectAllBtn.onClick = function () {
-  setPhonemeSelection(function () {
-    return true;
-  });
-};
-
-// 全解除
-deselectAllBtn.onClick = function () {
-  setPhonemeSelection(function () {
-    return false;
-  });
-};
-
-// 母音+ん（よく使うもの）を選択
-selectCommonBtn.onClick = function () {
-  setPhonemeSelection(function (item) {
-    return isCommonPhoneme(item.phoneme);
-  });
-};
-
-// 子音をチェックに「追加」する（現在の選択は維持。母音+ん → 子音 で母音ん＋子音に）
-selectConsonantBtn.onClick = function () {
-  setPhonemeSelection(function (item) {
-    return item.checkbox.value || isConsonantPhoneme(item.phoneme);
-  });
-};
-
 // Phonemeレイヤー作成
 createBtn.onClick = function () {
   var comp = app.project.activeItem;
@@ -1392,14 +1417,16 @@ createBtn.onClick = function () {
 
   // 選択された音素のみ抽出
   var selectedPhonemes = [];
-  for (var i = 0; i < phonemeData.length; i++) {
-    if (!phonemeData[i].checkbox.value) continue;
+  for (var i = 0; i < phonemeCandidates.length; i++) {
+    var cand = phonemeCandidates[i];
+    if (!phonemeChecked[cand.phoneme]) continue;
 
-    for (var j = 0; j < phonemeData[i].data.times.length; j++) {
+    var times = cand.data && cand.data.times ? cand.data.times : [];
+    for (var j = 0; j < times.length; j++) {
       selectedPhonemes.push({
-        startTime: phonemeData[i].data.times[j].start,
-        endTime: phonemeData[i].data.times[j].end,
-        phoneme: phonemeData[i].phoneme,
+        startTime: times[j].start,
+        endTime: times[j].end,
+        phoneme: cand.phoneme,
       });
     }
   }
