@@ -42,6 +42,7 @@ win.onActivate = function () {
   rebuildPsdDropdown(psdCtrlRow.dropdown, name, collectCtrlCandidates());
   rebuildStageRootDropdown(name);
   refreshStage(false);
+  refreshPhonemeChecklist(); // 一般音素(baseline)を最初から表示
   refreshMouthScroll();
   refreshMouthCoverage();
 })();

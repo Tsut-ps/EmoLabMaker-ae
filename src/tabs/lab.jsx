@@ -346,11 +346,22 @@ var CONSONANT_PHONEMES = [
   "y", "r", "ry", "w", "v",
 ];
 
+// 最初から出しておく「おすすめ子音」（母音+ん＋特殊＝commonPhonemes と合わせて baseline）。
+// よく使う・口形を付けやすい子音に絞る（多すぎ防止。残りは「子音」ボタンで追加可能）。
+var RECOMMENDED_CONSONANTS = ["k", "s", "t", "n", "h", "m", "r", "w"];
+
 var phonemeData = [];
 var labFile = null;
+var labFileEntries = []; // 直近に読み込んだ lab の音素＋出現回数（確認表示用）
+var extraPhonemes = []; // ユーザーが「追加」した音素（baseline に上乗せ）
 
 // 発話終了時に打つ「閉じ音素」。どの母音にも属さない pau を使い、閉じ口へ戻す。
 var LAB_CLOSE_PHONEME = "pau";
+
+// baseline（最初から出す一般音素）= 母音+ん+特殊 ＋ おすすめ子音 ＋ ユーザー追加分
+function baselinePhonemes() {
+  return commonPhonemes.concat(RECOMMENDED_CONSONANTS).concat(extraPhonemes);
+}
 
 function setPhonemeSelection(selector) {
   for (var i = 0; i < phonemeData.length; i++) {
@@ -381,6 +392,35 @@ selectConsonantBtn.helpTip =
   "ファイル内の子音(k/s/t…)も追加でチェック（より細かい口の動き）";
 var deselectAllBtn = phonemeSelectorGroup.add("button", undefined, "解除");
 deselectAllBtn.alignment = ["fill", "center"];
+
+// ========== 足りない音素を追加（一覧に無い音素を候補に足す） ==========
+var phonemeAddRow = phonemeListPanel.add("group");
+phonemeAddRow.orientation = "row";
+phonemeAddRow.alignment = ["fill", "top"];
+phonemeAddRow.alignChildren = ["left", "center"];
+phonemeAddRow.spacing = 4;
+phonemeAddRow.add("statictext", undefined, "追加:");
+var phonemeAddInput = phonemeAddRow.add("edittext", undefined, "");
+phonemeAddInput.preferredSize = [120, BUTTON_HEIGHT];
+phonemeAddInput.helpTip =
+  "一覧に無い音素を候補に追加（カンマ区切り可）。ファイルに無い音素は淡色で表示";
+var phonemeAddBtn = phonemeAddRow.add("button", undefined, "＋");
+phonemeAddBtn.preferredSize = [32, BUTTON_HEIGHT];
+phonemeAddBtn.onClick = function () {
+  var toks = normalizeCsvTokens(phonemeAddInput.text);
+  var added = 0;
+  for (var i = 0; i < toks.length; i++) {
+    var p = toks[i];
+    if (indexOfName(baselinePhonemes(), p) < 0 && indexOfName(extraPhonemes, p) < 0) {
+      extraPhonemes.push(p);
+      added++;
+    }
+  }
+  if (added > 0) {
+    phonemeAddInput.text = "";
+    refreshPhonemeChecklist();
+  }
+};
 
 // ========== タイミング設定グループ（全て app.settings で永続化） ==========
 var offsetGroup = labPanel.add("group");
@@ -1202,34 +1242,27 @@ framePlus.onClick = function () {
   adjustMarkersByFrames(1);
 };
 
-// ファイル選択
-browseBtn.onClick = function () {
-  labFile = File.openDialog("labファイルを選択", "*.lab");
-  if (!labFile) return;
-
-  filePathText.text = decodeURI(labFile.name);
-
-  // labファイルをパース
-  labFile.open("r");
-  var content = labFile.read();
-  labFile.close();
-
-  var phonemeEntries = parseLabPhonemeEntries(content);
-
-  var sortedPhonemes = buildSortedPhonemeList(phonemeEntries);
-
-  // UI更新：既存のチェックボックスをクリア
-  phonemeData = [];
-  for (var i = phonemeCheckboxGroup.children.length - 1; i >= 0; i--) {
-    phonemeCheckboxGroup.remove(phonemeCheckboxGroup.children[i]);
+// チェックリストを (再)構築する。list = [{phoneme, count, data}]。
+// 既存のチェック状態は維持し、新規項目は母音+ん(common)を既定チェックにする。
+function rebuildPhonemeChecklist(list) {
+  // 既存のチェック状態を覚えておく（再構築でリセットしないため）
+  var prevChecked = {};
+  var k;
+  for (k = 0; k < phonemeData.length; k++) {
+    prevChecked[phonemeData[k].phoneme] = phonemeData[k].checkbox.value;
   }
 
-  // チェックボックスを横3列で配置
+  phonemeData = [];
+  for (k = phonemeCheckboxGroup.children.length - 1; k >= 0; k--) {
+    phonemeCheckboxGroup.remove(phonemeCheckboxGroup.children[k]);
+  }
+
   var currentRow = null;
   var colCount = 0;
-
-  for (var i = 0; i < sortedPhonemes.length; i++) {
-    var item = sortedPhonemes[i];
+  var hasFile = false;
+  for (var i = 0; i < list.length; i++) {
+    var item = list[i];
+    if (item.count > 0) hasFile = true;
 
     if (colCount === 0) {
       currentRow = phonemeCheckboxGroup.add("group");
@@ -1246,40 +1279,65 @@ browseBtn.onClick = function () {
     itemGroup.spacing = 2;
 
     var cb = itemGroup.add("checkbox", undefined, "");
-    cb.value = isCommonPhoneme(item.phoneme);
+    // 既存チェックは維持。新規は母音+ん を既定でON
+    cb.value =
+      prevChecked.hasOwnProperty(item.phoneme)
+        ? prevChecked[item.phoneme]
+        : isCommonPhoneme(item.phoneme);
     cb.onClick = function () {
       refreshMouthCoverage();
     };
 
-    var label = itemGroup.add(
-      "statictext",
-      undefined,
-      item.phoneme + "(" + item.count + ")",
-    );
+    // 表示: ファイルにある音素は "k(3)"、baseline のみ(ファイルに無い)は "k" を淡色で
+    var labelText = item.count > 0 ? item.phoneme + "(" + item.count + ")" : item.phoneme;
+    var label = itemGroup.add("statictext", undefined, labelText);
     label.minimumSize.width = 50;
+    if (item.count <= 0) setCheckColor(label, [0.5, 0.5, 0.5, 1]);
+    label.helpTip =
+      item.count > 0
+        ? "このファイルに " + item.count + " 回出現"
+        : "このファイルには含まれていません（一般音素として候補表示）";
 
-    phonemeData.push({
-      checkbox: cb,
-      phoneme: item.phoneme,
-      // ここで元データ参照を保持しておくと、Create 時に再探索せず使える
-      data: item.data,
-    });
+    phonemeData.push({ checkbox: cb, phoneme: item.phoneme, data: item.data });
 
     colCount++;
-    if (colCount >= 3) {
-      colCount = 0;
-    }
+    if (colCount >= 3) colCount = 0;
   }
 
-  // レイアウトを更新
-  phonemeCheckboxGroup.layout.layout(true);
-  phonemeListPanel.layout.layout(true);
-  tabLab.layout.layout(true);
-  win.layout.layout(true);
-  win.layout.resize();
+  try {
+    phonemeCheckboxGroup.layout.layout(true);
+    phonemeListPanel.layout.layout(true);
+  } catch (eL) {}
+  createBtn.enabled = hasFile; // 実際に配置できる（ファイルに音素がある）ときだけ有効
+  refreshMouthCoverage();
+}
 
-  createBtn.enabled = sortedPhonemes.length > 0;
-  refreshMouthCoverage(); // 読込で「使う音素」が変わるので警告を更新
+// baseline ＋ 直近 lab をマージして再構築
+function refreshPhonemeChecklist() {
+  rebuildPhonemeChecklist(
+    buildMergedPhonemeList(labFileEntries, baselinePhonemes()),
+  );
+}
+
+// ファイル選択
+browseBtn.onClick = function () {
+  labFile = File.openDialog("labファイルを選択", "*.lab");
+  if (!labFile) return;
+
+  filePathText.text = decodeURI(labFile.name);
+
+  labFile.open("r");
+  var content = labFile.read();
+  labFile.close();
+
+  labFileEntries = parseLabPhonemeEntries(content);
+  refreshPhonemeChecklist(); // baseline ＋ このファイルの音素(回数付き)で再構築
+
+  try {
+    tabLab.layout.layout(true);
+    win.layout.layout(true);
+    win.layout.resize();
+  } catch (eW) {}
 };
 
 // 全選択

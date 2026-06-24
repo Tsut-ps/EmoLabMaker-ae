@@ -34,6 +34,7 @@ var OUT_FILE = path.join(OUT_DIR, "EmoLabMaker.jsx");
 //   IIFE_OPEN + BODY(各断片) + IIFE_CLOSE … 共有クロージャ本体
 var HEADER = ["00_header.jsx"];
 var BODY = [
+  "01_version.jsx",
   "05_open.jsx",
   // 共通基盤（旧 10_core.jsx を意味単位に分割。すべて関数宣言/定数で順序自由）
   "core/layers.jsx",

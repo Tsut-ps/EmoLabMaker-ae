@@ -329,6 +329,41 @@ function buildSortedPhonemeList(entries) {
   return sorted.concat(otherPhonemes);
 }
 
+// baseline（最初から出す一般音素）と fileEntries（lab の音素＋出現回数）をマージした
+// チェックリスト用配列を返す。各要素 {phoneme, count, data}。
+//   - baseline の音素は常に含める（ファイルに無ければ count=0）
+//   - ファイル固有（baseline外）の音素は count>0 のものを追加
+//   - 並び: common(母音+ん) → baseline の残り → ファイル固有
+// これで「一般音素を最初から表示し、lab の音素は確認（count付き）として上乗せ」できる。
+function buildMergedPhonemeList(fileEntries, baseline) {
+  fileEntries = fileEntries || [];
+  baseline = baseline || [];
+  var byName = {};
+  var i;
+  for (i = 0; i < fileEntries.length; i++) {
+    var fe = fileEntries[i];
+    if (fe && fe.phoneme) byName[fe.phoneme] = fe;
+  }
+  var out = [];
+  var seen = {};
+  function push(name) {
+    if (!name || seen[name]) return;
+    seen[name] = true;
+    var e = byName[name];
+    out.push({
+      phoneme: name,
+      count: e ? e.count : 0,
+      data: e || { phoneme: name, count: 0 },
+    });
+  }
+  for (i = 0; i < commonPhonemes.length; i++) push(commonPhonemes[i]);
+  for (i = 0; i < baseline.length; i++) push(baseline[i]);
+  for (i = 0; i < fileEntries.length; i++) {
+    if (fileEntries[i] && fileEntries[i].count > 0) push(fileEntries[i].phoneme);
+  }
+  return out;
+}
+
 /**
  * 音素レイヤー探索 + 現在音素取得のロジック部分。
  * 口形マッピング式で使う。
