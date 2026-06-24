@@ -59,16 +59,7 @@
 | 項目 | 状況・メモ |
 |---|---|
 | 音素選択のダイアログ化 | **進行中**（上記） |
-| txt（字幕）と lab/音声のタイミング連携 | 未対応。現状は txt をそのまま字幕テキストレイヤー化するだけ（`src/tabs/lab.jsx` の「連携は今後対応」コメント） |
-| `:flipx/:flipy` の自動生成 | 未対応。**全体反転（キャンバスミラー）とペアスワップは実装済み**（`applyStageFlip` / `mirrorLayersInComp`）。手描きペアが無いレイヤーを Scale 反転で自動生成する部分が未対応（孤立 flip はレポート警告のみ） |
-| 中間目（mid）の複数コマ対応 | 未対応。現状は 開き / 中間1枚 / 閉じ の 3 役のみ（`buildBlinkExpression` の `hasMid`） |
 | 口形マッピングの永続化 | 未対応。現状はエクスプレッションに焼き込み、「現在を取込」で各行へ復元する方式 |
-| PSDTool お気に入り(.pfv) 読み込み | 未対応。読み込んで「表情セット（`[EmoSet]`）」に変換できると便利 |
-| プレビュー軽量化の大物（音素ブロードキャスタ集約） | **保留**。口パク式は複数 [Lab] 前提で各口形レイヤーが毎フレーム [Lab] を走査する。1 枚に集約すれば軽くなるが、データモデル変更＝バグ増リスクが高く今は見送り（軽量・低リスク分は v2.8.1 で実施済み。焼き込み/グループ優先オプション化はワークフロー悪化のため却下済み） |
-
-**実装済みで「今後候補」から外れたもの**（混乱防止のため明記）:
-立ち絵タブの選択肢ボタン折返し（`rebuildStageTree` で実装済み）/ 目パチの [Emo] マーカー連動
-（`buildBlinkExpression` の emoCtx で実装済み）/ 表情セット切替（`[EmoSet]`）/ 立ち絵タブ＋マーカー集合モデル。
 
 ---
 
@@ -106,20 +97,10 @@
   ＋ `CHANGELOG.md`（先頭に追記）。
 - `EMO_VERSION` を独立ファイルにしているのは、版上げ時の差分・コンテキスト消費を小さく保つため。
 
-### Git / コミット
-- 開発・push は **`claude/psdtoolkit-compatibility-plan-qbn4fy`** ブランチのみ。無ければ作る。
-  指示なく別ブランチへ push しない。
-- **push 前に必ず** `git fetch origin <branch>` で乖離確認（ユーザーが README 等を直接コミットする）。
-  乖離があれば rebase。
-- push: `git push -u origin <branch>`。ネットワーク失敗時のみ指数バックオフ（2s/4s/8s/16s）で最大4回。
-- **PR はユーザーが明示的に頼んだときだけ**作る。
-- コミットメッセージ末尾に必ず付ける:
-  ```
-  Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
-  Claude-Session: <そのセッションの Claude-Session URL>
-  ```
-  （`Claude-Session` URL はセッションごとに異なる。各セッションのシステム指示の値を使う）
-- **モデル ID（claude-opus-4-8 等）を成果物に書かない**（commit / PR / コード / コメント）。チャット内のみ。
+### Git
+- push 前に `git fetch` でリモートとの乖離を確認（ユーザーが README 等を直接コミットすることがある）。
+  乖離があれば rebase してから push。
+- 生成物 `dist/` はコミットしない。
 
 ### リリース
 - `.github/workflows/release.yml` が `v*` タグ push（または手動 dispatch）で `node build.js` →
