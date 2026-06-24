@@ -23,6 +23,7 @@ fileSelectGroup.add("statictext", undefined, "labファイル");
 
 var filePathText = fileSelectGroup.add("edittext", undefined, "ファイル未選択");
 filePathText.alignment = ["fill", "center"];
+filePathText.preferredSize.height = BUTTON_HEIGHT;
 filePathText.enabled = false;
 
 var browseBtn = fileSelectGroup.add("button", undefined, "...");
@@ -139,9 +140,11 @@ bulkBtnRow.alignChildren = ["fill", "center"];
 bulkBtnRow.alignment = ["fill", "top"];
 bulkBtnRow.spacing = 5;
 var bulkPickBtn = bulkBtnRow.add("button", undefined, "ファイルを選択して配置");
+bulkPickBtn.preferredSize.height = BUTTON_HEIGHT;
 bulkPickBtn.helpTip =
   "wav/txt/lab をまとめて選択し、同名どうしを1組として現在のコンポに配置（A方式）";
 var bulkSiblingBtn = bulkBtnRow.add("button", undefined, "選択音声の隣を取込");
+bulkSiblingBtn.preferredSize.height = BUTTON_HEIGHT;
 bulkSiblingBtn.helpTip =
   "選択した音声レイヤーのソースと同じ名前の .lab/.txt が隣にあれば取り込む（B方式）";
 
@@ -383,15 +386,19 @@ phonemeSelectorGroup.spacing = 5;
 
 var selectAllBtn = phonemeSelectorGroup.add("button", undefined, "すべて");
 selectAllBtn.alignment = ["fill", "center"];
+selectAllBtn.preferredSize.height = BUTTON_HEIGHT;
 var selectCommonBtn = phonemeSelectorGroup.add("button", undefined, "母音+ん");
 selectCommonBtn.alignment = ["fill", "center"];
+selectCommonBtn.preferredSize.height = BUTTON_HEIGHT;
 selectCommonBtn.helpTip = "母音・ん・無音/閉じ系を選択（基本はこれでOK）";
 var selectConsonantBtn = phonemeSelectorGroup.add("button", undefined, "子音");
 selectConsonantBtn.alignment = ["fill", "center"];
+selectConsonantBtn.preferredSize.height = BUTTON_HEIGHT;
 selectConsonantBtn.helpTip =
   "ファイル内の子音(k/s/t…)も追加でチェック（より細かい口の動き）";
 var deselectAllBtn = phonemeSelectorGroup.add("button", undefined, "解除");
 deselectAllBtn.alignment = ["fill", "center"];
+deselectAllBtn.preferredSize.height = BUTTON_HEIGHT;
 
 // ========== 足りない音素を追加（一覧に無い音素を候補に足す） ==========
 var phonemeAddRow = phonemeListPanel.add("group");
@@ -735,17 +742,22 @@ mouthMapBtnRow.alignChildren = ["fill", "center"];
 mouthMapBtnRow.spacing = 5;
 
 var mouthAutoBtn = mouthMapBtnRow.add("button", undefined, "自動割当");
+mouthAutoBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthAutoBtn.helpTip =
   "選択レイヤー名に「あ/い/う/え/お/ん/閉」が含まれていれば自動で割当";
 var mouthImportBtn = mouthMapBtnRow.add("button", undefined, "現在を取込");
+mouthImportBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthImportBtn.helpTip =
   "アクティブコンポの既存マッピング式（口パク設定済みレイヤー）を読み取って各行に反映";
 var mouthPresetBtn = mouthMapBtnRow.add("button", undefined, "プリセット");
+mouthPresetBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthPresetBtn.helpTip = "口形マッピングを初期状態（あ/い/う/え/お/ん）に戻す";
 var mouthApplyBtn = mouthMapBtnRow.add("button", undefined, "適用");
+mouthApplyBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthApplyBtn.helpTip =
   "割当済みレイヤーに不透明度エクスプレッションを設定（表情登録済みなら共存）";
 var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
+mouthRemoveBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthRemoveBtn.helpTip =
   "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
 
@@ -1170,10 +1182,12 @@ labBtnRow.spacing = 10;
 
 var createBtn = labBtnRow.add("button", undefined, "音素配置");
 createBtn.alignment = ["fill", "center"];
+createBtn.preferredSize.height = BUTTON_HEIGHT;
 createBtn.enabled = false;
 
 var deleteMarkersBtn = labBtnRow.add("button", undefined, "一括削除");
 deleteMarkersBtn.alignment = ["fill", "center"];
+deleteMarkersBtn.preferredSize.height = BUTTON_HEIGHT;
 
 // ========== イベントハンドラ ==========
 

@@ -63,6 +63,7 @@ var psdSetupBtn = tabPsd.add(
   "解析してセットアップ / 更新",
 );
 psdSetupBtn.alignment = ["fill", "top"];
+psdSetupBtn.preferredSize.height = BUTTON_HEIGHT;
 psdSetupBtn.helpTip =
   "PSDToolKit の命名規則 (* = 排他 / ! = 強制表示 / :flipx = 反転ペア) を解釈して表情切替を自動セットアップ。再実行で更新";
 
@@ -83,13 +84,18 @@ var psdPrefixRow = psdPrefixPanel.add("group");
 psdPrefixRow.orientation = "row";
 psdPrefixRow.alignChildren = ["left", "center"];
 psdPrefixRow.spacing = 5;
+// 3 ボタンは同じ固定幅・同じ高さで揃える（一番長い「* 排他(ラジオ)」が収まる幅）
+var PREFIX_BTN_W = 116;
 var psdAddStarBtn = psdPrefixRow.add("button", undefined, "* 排他(ラジオ)");
+psdAddStarBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
 psdAddStarBtn.helpTip =
   "選択レイヤーに * を付与（兄弟内で排他＝ラジオ選択）。既存の * / ! は置換";
 var psdAddBangBtn = psdPrefixRow.add("button", undefined, "! 強制表示");
+psdAddBangBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
 psdAddBangBtn.helpTip =
   "選択レイヤーに ! を付与（常に表示）。既存の * / ! は置換";
 var psdStripBtn = psdPrefixRow.add("button", undefined, "prefix除去");
+psdStripBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
 psdStripBtn.helpTip = "選択レイヤーの先頭の * / ! を除去（無印＝任意指定に）";
 
 // 選択レイヤーの先頭 prefix を mode("*"/"!"/"") に付け替える
@@ -167,8 +173,10 @@ var psdExtendInput = psdExtendRow.add("edittext", undefined, "");
 psdExtendInput.preferredSize = [70, BUTTON_HEIGHT];
 psdExtendInput.helpTip = "伸ばしたい長さ（秒）。既定はアクティブなコンポの長さ";
 var psdExtendActiveBtn = psdExtendRow.add("button", undefined, "アクティブの長さ");
+psdExtendActiveBtn.preferredSize = [104, BUTTON_HEIGHT];
 psdExtendActiveBtn.helpTip = "アクティブなコンポの長さを入力欄に入れる";
 var psdExtendBtn = psdExtendRow.add("button", undefined, "適用");
+psdExtendBtn.preferredSize = [56, BUTTON_HEIGHT];
 psdExtendBtn.helpTip =
   "選択レイヤーの outPoint と、参照先コンポ・配下の尺をこの長さまで伸ばす（未選択時は何もしない）";
 
@@ -322,12 +330,15 @@ blinkBtnRow.alignChildren = ["fill", "center"];
 blinkBtnRow.spacing = 5;
 
 var blinkApplyBtn = blinkBtnRow.add("button", undefined, "目パチ設定");
+blinkApplyBtn.preferredSize.height = BUTTON_HEIGHT;
 blinkApplyBtn.helpTip =
   "割当レイヤーに自動まばたきを設定（表情登録済みなら開き目表情中のみまばたき）";
 var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除(コンポ)");
+blinkRemoveBtn.preferredSize.height = BUTTON_HEIGHT;
 blinkRemoveBtn.helpTip =
   "アクティブコンポ内の目パチを一括解除（開き/中間/閉じをまとめて。表情登録済みなら表情切替に戻す）";
 var blinkRemoveListBtn = blinkBtnRow.add("button", undefined, "解除(一覧)");
+blinkRemoveListBtn.preferredSize.height = BUTTON_HEIGHT;
 blinkRemoveListBtn.helpTip =
   "プロジェクト内の目パチ設定済みコンポを一覧から選んで一括解除（レイヤー選択不要）";
 

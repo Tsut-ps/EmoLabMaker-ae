@@ -1,7 +1,8 @@
 // ════════════════════════════════════════════════════════════════
 // 共通定数
 // ════════════════════════════════════════════════════════════════
-var BUTTON_HEIGHT = 20;
+// ボタン・入力欄・ドロップダウンの共通高さ（全コントロールでこの高さに統一する）
+var BUTTON_HEIGHT = 22;
 var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
 var BLINK_SIGNATURE = "emoBlinkAuto";
 
