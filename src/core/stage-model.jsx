@@ -138,6 +138,21 @@ function detectCompPrefix(comp) {
   return detectDominantPrefix(names);
 }
 
+// レイヤーが「立ち絵の管理下」か（セットアップで emo/口パク/目パチ いずれかの
+// 不透明度式が付いている）。無印リーフのうちシーン装飾（カメラ/手置きレイヤー等）を
+// 立ち絵ツリーから除外する判定に使う。
+function isManagedStageLayer(layer) {
+  try {
+    return (
+      isRegistered(layer) ||
+      hasOpacitySignature(layer, LAB_MAP_SIGNATURE) ||
+      hasOpacitySignature(layer, BLINK_SIGNATURE)
+    );
+  } catch (e) {
+    return false;
+  }
+}
+
 function buildStageNodes(rootComp) {
   var visited = {};
   if (!rootComp) return [];
@@ -213,7 +228,16 @@ function buildStageNodes(rootComp) {
         });
       } else {
         // 無印 = 任意指定（独立 ON/OFF）。リーフでもフォルダでも checkbox にする
-        // （フォルダはサブ階層を持ちつつ、自身も丸ごと表示/非表示できる）
+        // （フォルダはサブ階層を持ちつつ、自身も丸ごと表示/非表示できる）。
+        // ただしルート（シーンコンポ）を立ち絵に選ぶと、シーンに手置きした装飾
+        // レイヤー（カメラ/ライト/テキスト/図形など）が（ルート）に紛れ込む。
+        // 立ち絵の部品はセットアップ時に必ず管理下の式（emo/口パク/目パチ）が
+        // 付くので、ルート直下では「フォルダ」か「管理下の式を持つ」ものだけを
+        // 任意指定として出し、それ以外（装飾レイヤー）は除外する。
+        // ネストした部品コンポ内の無印リーフは従来どおり出す（クリックで自動登録できる）。
+        if (isRoot && !isFolder && !isManagedStageLayer(layer)) {
+          continue; // ルート直下のシーン装飾レイヤー → 選択肢にしない
+        }
         optional.push({
           fullName: layer.name,
           label: parsed.base,
