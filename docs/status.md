@@ -62,21 +62,7 @@
 
 ---
 
-## 3. 検証メモ（セッション固有）
-
-恒久的な開発ルール（ソース構成・ビルド・ES3 制約・バージョニング・リリース・設計メモ）は
-[DEVELOPMENT.md](../DEVELOPMENT.md) に集約。ここには一時的な運用メモだけ残す。
-
-- テストハーネス: **`/tmp/test_emolab.js`**（現在 **319 件** passing）。`dist` を読むので
-  先に `node build.js`。実行: `node /tmp/test_emolab.js`。
-  - ⚠ `/tmp` にあり**リポジトリ外**。新しいコンテナでは消える可能性が高い。無ければ前セッションの
-    内容から作り直すか、ユーザーに確認すること（リポジトリ化の検討余地あり）。
-  - `mockLayer(name, enabled, source, expr)` は expr 対応済み。
-    `isManagedStageLayer` / `isRegistered` / `hasOpacitySignature` は抽出済み。
-
----
-
-## 4. 完了済みの主要機能（参照用）
+## 3. 完了済みの主要機能（参照用）
 
 - セットアップタブ: PSDToolKit 命名規則（`*`排他 / `!`強制 / 無印=任意 / `:flipx`反転ペア）の自動解析・
   セットアップ（冪等）。命名ショートカット、尺を伸ばす（選択ベース）、設定。
