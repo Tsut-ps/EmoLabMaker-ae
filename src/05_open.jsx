@@ -263,13 +263,23 @@ win.margins = 6;
 var tabs = win.add("tabbedpanel");
 tabs.alignment = ["fill", "fill"];
 
-// バージョン表示（右下の隅）
-var versionRow = win.add("group");
-versionRow.orientation = "row";
-versionRow.alignment = ["fill", "bottom"];
-versionRow.alignChildren = ["right", "center"];
-versionRow.margins = [0, 0, 2, 0];
-var versionText = versionRow.add("statictext", undefined, "v" + EMO_VERSION);
+// 下部バー: 状態テキスト（左・各タブ共通）＋ バージョン（右）を 1 行に収める。
+// 各タブはこの statusText に書き込む（タブごとの下部説明をウィンドウ共通化）。
+var statusRow = win.add("group");
+statusRow.orientation = "row";
+statusRow.alignment = ["fill", "bottom"];
+statusRow.alignChildren = ["fill", "center"];
+statusRow.spacing = 6;
+statusRow.margins = [2, 0, 2, 0];
+
+var statusText = statusRow.add(
+  "statictext",
+  undefined,
+  "PSD のルートコンポを選択してください。",
+);
+statusText.alignment = ["fill", "center"];
+
+var versionText = statusRow.add("statictext", undefined, "v" + EMO_VERSION);
 versionText.alignment = ["right", "center"];
 versionText.helpTip = "EmoLabMaker version " + EMO_VERSION;
 try {
@@ -305,5 +315,5 @@ tabStage.alignChildren = ["fill", "top"];
 tabStage.spacing = 6;
 tabStage.margins = 6;
 
-// 並びは PSD が先頭だが、日常のハブである立ち絵を初期選択にする
-tabs.selection = tabStage;
+// 初期表示はセットアップ（PSD 取込・初期準備）タブ
+tabs.selection = tabPsd;

@@ -67,72 +67,8 @@ cbImportWav.onClick = function () {
   setSettingBool("importWav", cfgImportWav);
 };
 
-// 配置する音素の絞り込み（空＝すべて）(#M)
-var bulkPhonemeRow = bulkPanel.add("group");
-bulkPhonemeRow.orientation = "row";
-bulkPhonemeRow.alignChildren = ["left", "center"];
-bulkPhonemeRow.spacing = 4;
-bulkPhonemeRow.add("statictext", undefined, "音素:");
-var bulkPhonemeInput = bulkPhonemeRow.add(
-  "edittext",
-  undefined,
-  cfgImportPhonemes,
-);
-bulkPhonemeInput.preferredSize = [180, BUTTON_HEIGHT];
-bulkPhonemeInput.helpTip =
-  "配置する音素をカンマ区切りで指定（空＝すべて）。既定は母音＋ん＋閉じ系";
-bulkPhonemeInput.onChange = function () {
-  cfgImportPhonemes = bulkPhonemeInput.text;
-  setSettingStr("importPhonemes", cfgImportPhonemes);
-  refreshMouthCoverage();
-};
-var bulkPhonemeVowelBtn = bulkPhonemeRow.add("button", undefined, "母音+ん");
-bulkPhonemeVowelBtn.preferredSize = [64, BUTTON_HEIGHT];
-bulkPhonemeVowelBtn.helpTip =
-  "口パクの基本セット（a,i,u,e,o,N,pau,sil,cl,Q,br）に戻す";
-bulkPhonemeVowelBtn.onClick = function () {
-  bulkPhonemeInput.text = "a,i,u,e,o,N,pau,sil,cl,Q,br";
-  cfgImportPhonemes = bulkPhonemeInput.text;
-  setSettingStr("importPhonemes", cfgImportPhonemes);
-  refreshMouthCoverage();
-};
-var bulkPhonemeConsonantBtn = bulkPhonemeRow.add("button", undefined, "子音");
-bulkPhonemeConsonantBtn.preferredSize = [48, BUTTON_HEIGHT];
-bulkPhonemeConsonantBtn.helpTip =
-  "現在の指定に子音(k/s/t…)を追加（空＝全指定のときは母音+ん＋子音にする）";
-bulkPhonemeConsonantBtn.onClick = function () {
-  // 現在のトークン（空なら母音+ん）に子音をマージして重複を除く
-  var cur = normalizeCsvTokens(bulkPhonemeInput.text);
-  if (cur.length === 0) cur = normalizeCsvTokens("a,i,u,e,o,N,pau,sil,cl,Q,br");
-  var seen = {};
-  var merged = [];
-  var i;
-  for (i = 0; i < cur.length; i++) {
-    if (!seen[cur[i]]) {
-      seen[cur[i]] = true;
-      merged.push(cur[i]);
-    }
-  }
-  for (i = 0; i < CONSONANT_PHONEMES.length; i++) {
-    if (!seen[CONSONANT_PHONEMES[i]]) {
-      seen[CONSONANT_PHONEMES[i]] = true;
-      merged.push(CONSONANT_PHONEMES[i]);
-    }
-  }
-  bulkPhonemeInput.text = merged.join(",");
-  cfgImportPhonemes = bulkPhonemeInput.text;
-  setSettingStr("importPhonemes", cfgImportPhonemes);
-  refreshMouthCoverage();
-};
-var bulkPhonemeAllBtn = bulkPhonemeRow.add("button", undefined, "すべて");
-bulkPhonemeAllBtn.preferredSize = [56, BUTTON_HEIGHT];
-bulkPhonemeAllBtn.helpTip = "すべての音素を配置（絞り込みなし）";
-bulkPhonemeAllBtn.onClick = function () {
-  bulkPhonemeInput.text = "";
-  cfgImportPhonemes = "";
-  setSettingStr("importPhonemes", "");
-  refreshMouthCoverage();
-};
+// 配置する音素は「音素マーカー (lab)」パネルの『音素:』欄（単体配置と共通）。
+// 一括もそこで指定した cfgImportPhonemes（空＝すべて）で絞り込む。
 
 var bulkBtnRow = bulkPanel.add("group");
 bulkBtnRow.orientation = "row";
@@ -180,7 +116,7 @@ bulkPickBtn.onClick = function () {
     wav: cfgImportWav,
     offsetSec: t.offsetSec,
     autoClose: cfgLabAutoClose,
-    phonemeFilter: normalizeCsvTokens(bulkPhonemeInput.text),
+    phonemeFilter: normalizeCsvTokens(cfgImportPhonemes),
   };
   var total = { wav: 0, txt: 0, lab: 0 };
   beginUndo("lab2layer: ファイル一括読み込み");
@@ -257,7 +193,7 @@ bulkSiblingBtn.onClick = function () {
             base,
             t.offsetSec,
             cfgLabAutoClose,
-            normalizeCsvTokens(bulkPhonemeInput.text),
+            normalizeCsvTokens(cfgImportPhonemes),
           )
         ) {
           labCount++;
@@ -289,27 +225,32 @@ bulkSiblingBtn.onClick = function () {
   );
 };
 
-// ========== 音素を選択（ボタン → モーダルダイアログ） ==========
-// 以前はインラインのチェックボックス一覧だったが、パネルを圧迫するためダイアログ化。
-// 選択状態は widget の外（phonemeChecked）に永続化し、候補一覧（phonemeCandidates）と
-// あわせてダイアログを開くたびに再描画、OK で書き戻す（Cancel で破棄）。
+// ========== 配置する音素（単体配置・一括配置で共通） ==========
+// 「音素: [入力欄] [音素を選択…]」の1行。入力欄(cfgImportPhonemes, 空＝すべて)が
+// 単一ソースで、直接編集もダイアログ選択も同じ欄を書き換える。
 var phonemeSelectRow = labPanel.add("group");
 phonemeSelectRow.orientation = "row";
 phonemeSelectRow.alignment = ["fill", "top"];
 phonemeSelectRow.alignChildren = ["left", "center"];
-phonemeSelectRow.spacing = 6;
+phonemeSelectRow.spacing = 4;
+
+phonemeSelectRow.add("statictext", undefined, "音素:");
+var phonemeInput = phonemeSelectRow.add("edittext", undefined, cfgImportPhonemes);
+phonemeInput.alignment = ["fill", "center"];
+phonemeInput.preferredSize.height = BUTTON_HEIGHT;
+phonemeInput.helpTip =
+  "配置する音素をカンマ区切りで指定（空＝すべて）。単体配置・一括配置で共通。既定は母音＋ん＋閉じ系";
+phonemeInput.onChange = function () {
+  cfgImportPhonemes = phonemeInput.text;
+  setSettingStr("importPhonemes", cfgImportPhonemes);
+  onPhonemeSelectionChanged();
+};
 
 var phonemeSelectBtn = phonemeSelectRow.add("button", undefined, "音素を選択…");
 phonemeSelectBtn.preferredSize = [96, BUTTON_HEIGHT];
+phonemeSelectBtn.alignment = ["right", "center"];
 phonemeSelectBtn.helpTip =
   "配置する音素をチェックで選びます（母音+ん/子音/すべて 等）";
-
-var phonemeSummaryText = phonemeSelectRow.add(
-  "statictext",
-  undefined,
-  "選択: （なし）",
-);
-phonemeSummaryText.alignment = ["fill", "center"];
 
 // 母音
 // a, i, u, e, o - 基本母音5つ
@@ -359,8 +300,8 @@ var CONSONANT_PHONEMES = [
 // よく使う・口形を付けやすい子音に絞る（多すぎ防止。残りは「子音」ボタンで追加可能）。
 var RECOMMENDED_CONSONANTS = ["k", "s", "t", "n", "h", "m", "r", "w"];
 
-// 選択状態は widget の外に持つ（ダイアログ開閉で widget は作り直されるため）。
-var phonemeChecked = {}; // 音素名 → bool（チェック状態）
+// 配置する音素の単一ソースは cfgImportPhonemes（CSV 文字列。空＝すべて）。
+// phonemeCandidates はダイアログ表示用の候補一覧（baseline ∪ 直近 lab）。
 var phonemeCandidates = []; // [{phoneme, count, data}]（buildMergedPhonemeList の結果）
 var labFile = null;
 var labFileEntries = []; // 直近に読み込んだ lab の音素＋出現回数（確認表示用）
@@ -374,20 +315,15 @@ function baselinePhonemes() {
   return commonPhonemes.concat(RECOMMENDED_CONSONANTS).concat(extraPhonemes);
 }
 
-// 候補一覧 (list=[{phoneme,count,data}]) を取り込み、選択状態を更新する。
-// 既存のチェックは維持し、新規候補は母音+ん(common)を既定チェックにする。
+// 候補一覧 (list=[{phoneme,count,data}]) を取り込む。選択そのものは
+// cfgImportPhonemes（CSV）が単一ソースなので、ここでは候補と配置可否だけ更新する。
 function setPhonemeCandidates(list) {
   phonemeCandidates = list;
   var hasFile = false;
   for (var i = 0; i < list.length; i++) {
     if (list[i].count > 0) hasFile = true;
-    var name = list[i].phoneme;
-    if (!phonemeChecked.hasOwnProperty(name)) {
-      phonemeChecked[name] = isCommonPhoneme(name);
-    }
   }
   createBtn.enabled = hasFile; // ファイルに音素があるときだけ「音素配置」可
-  updatePhonemeSummary();
   refreshMouthCoverage();
 }
 
@@ -398,59 +334,48 @@ function refreshPhonemeChecklist() {
   );
 }
 
-// 選択中サマリ（例: "選択: a,i,u,e,o,N (6)"）を更新
-function updatePhonemeSummary() {
-  if (!phonemeSummaryText) return; // UI 構築前のガード
-  var names = [];
-  for (var i = 0; i < phonemeCandidates.length; i++) {
-    if (phonemeChecked[phonemeCandidates[i].phoneme]) {
-      names.push(phonemeCandidates[i].phoneme);
-    }
-  }
-  if (names.length === 0) {
-    phonemeSummaryText.text = "選択: （なし）";
-  } else {
-    var shown = names;
-    var suffix = "";
-    if (names.length > 8) {
-      shown = names.slice(0, 8);
-      suffix = "…";
-    }
-    phonemeSummaryText.text =
-      "選択: " + shown.join(",") + suffix + " (" + names.length + ")";
-  }
-  try {
-    phonemeSelectRow.layout.layout(true);
-  } catch (e) {}
+// その音素が配置対象か（cfgImportPhonemes が空＝すべて）。
+function isPhonemeSelected(name) {
+  var toks = normalizeCsvTokens(cfgImportPhonemes);
+  if (toks.length === 0) return true; // 空＝すべて
+  return indexOfName(toks, name) >= 0;
 }
 
-// 選択した音素を、一括読み込みの「音素:」欄に無ければ自動追加する（#3）。
-// 欄が空（＝すべて）のときは全音素が対象なので何もしない（追加で逆に絞られるのを防ぐ）。
-function autoAddSelectedToBulk() {
-  var cur = normalizeCsvTokens(bulkPhonemeInput.text);
-  if (cur.length === 0) return; // 空＝すべて。追加不要
-  var seen = {};
-  var i;
-  for (i = 0; i < cur.length; i++) seen[cur[i]] = true;
-  var added = false;
-  for (i = 0; i < phonemeCandidates.length; i++) {
-    var name = phonemeCandidates[i].phoneme;
-    if (phonemeChecked[name] && !seen[name]) {
-      seen[name] = true;
-      cur.push(name);
-      added = true;
-    }
-  }
-  if (added) {
-    bulkPhonemeInput.text = cur.join(",");
-    cfgImportPhonemes = bulkPhonemeInput.text;
-    setSettingStr("importPhonemes", cfgImportPhonemes);
-  }
+// 配置する音素が変わったとき: 口形に無い音素は新規行で自動追加し、警告を更新する。
+function onPhonemeSelectionChanged() {
+  autoAddPhonemesToMouthRows();
+  refreshMouthCoverage();
 }
 
-// 「音素を選択…」ダイアログ。phonemeCandidates + phonemeChecked から描画し、
-// OK で phonemeChecked へ書き戻す（Cancel で破棄）。lab 状態にアクセスするため
-// lab.jsx 内のクロージャで実装する。
+// 「使う音素」のうち、どの口形行(CSV)にも無いものを口形マッピングへ新規行で追加する。
+function autoAddPhonemesToMouthRows() {
+  var existing = {};
+  var r, t;
+  for (r = 0; r < mouthRows.length; r++) {
+    var toks = normalizeCsvTokens(mouthRows[r].csvInput.text);
+    for (t = 0; t < toks.length; t++) existing[toks[t]] = true;
+  }
+  var used = collectUsedPhonemes();
+  var added = 0;
+  for (var i = 0; i < used.length; i++) {
+    var p = used[i];
+    if (existing[p]) continue;
+    existing[p] = true;
+    addMouthRow(p, p, false); // ラベル=音素・CSV=音素・閉じでない
+    added++;
+  }
+  if (added > 0) {
+    try {
+      mouthMapPanel.layout.layout(true);
+      refreshMouthScroll();
+    } catch (e) {}
+  }
+  return added;
+}
+
+// 「音素を選択…」ダイアログ。phonemeCandidates をチェックボックスで描画し、
+// 初期チェックは cfgImportPhonemes から。OK で CSV へ書き戻す（Cancel で破棄）。
+// すべてチェック＝空 CSV（=すべて）にして「未知の音素も配置」を保つ。
 function openPhonemeDialog() {
   if (phonemeCandidates.length === 0) {
     alert("選択できる音素がありません。labファイルを読み込んでください。");
@@ -474,11 +399,27 @@ function openPhonemeDialog() {
   listGroup.alignChildren = ["fill", "top"];
   listGroup.spacing = 2;
 
+  // 表示候補 = phonemeCandidates ∪ 入力欄に直接書かれた音素（OK で消えないように）
+  var dlgItems = [];
+  var seenItem = {};
+  var di;
+  for (di = 0; di < phonemeCandidates.length; di++) {
+    dlgItems.push(phonemeCandidates[di]);
+    seenItem[phonemeCandidates[di].phoneme] = true;
+  }
+  var csvToks = normalizeCsvTokens(cfgImportPhonemes);
+  for (di = 0; di < csvToks.length; di++) {
+    if (!seenItem[csvToks[di]]) {
+      seenItem[csvToks[di]] = true;
+      dlgItems.push({ phoneme: csvToks[di], count: 0, data: { times: [] } });
+    }
+  }
+
   var boxes = []; // [{checkbox, phoneme}]
   var currentRow = null;
   var colCount = 0;
-  for (var i = 0; i < phonemeCandidates.length; i++) {
-    var item = phonemeCandidates[i];
+  for (var i = 0; i < dlgItems.length; i++) {
+    var item = dlgItems[i];
     if (colCount === 0) {
       currentRow = listGroup.add("group");
       currentRow.orientation = "row";
@@ -489,7 +430,7 @@ function openPhonemeDialog() {
     var labelText =
       item.count > 0 ? item.phoneme + "(" + item.count + ")" : item.phoneme;
     var cb = currentRow.add("checkbox", undefined, labelText);
-    cb.value = !!phonemeChecked[item.phoneme];
+    cb.value = isPhonemeSelected(item.phoneme);
     cb.minimumSize.width = 64;
     // ファイルに無い音素（baseline のみ）は淡色にして「候補」だと分かるように
     if (item.count <= 0) setCheckColor(cb, [0.5, 0.5, 0.5, 1]);
@@ -550,14 +491,17 @@ function openPhonemeDialog() {
 
   if (dlg.show() !== 1) return;
 
-  // OK: ダイアログのチェックを本体へ書き戻す
+  // OK: チェック結果を CSV にまとめる（全候補チェック → 空＝すべて で catch-all を維持）
+  var chosen = [];
+  var allChecked = true;
   for (var k = 0; k < boxes.length; k++) {
-    phonemeChecked[boxes[k].phoneme] = boxes[k].checkbox.value;
+    if (boxes[k].checkbox.value) chosen.push(boxes[k].phoneme);
+    else allChecked = false;
   }
-  // 選択した音素を一括「音素:」欄へ自動追加（口パク設定側に無ければ足す）(#3)
-  autoAddSelectedToBulk();
-  updatePhonemeSummary();
-  refreshMouthCoverage();
+  cfgImportPhonemes = allChecked ? "" : chosen.join(",");
+  setSettingStr("importPhonemes", cfgImportPhonemes);
+  phonemeInput.text = cfgImportPhonemes;
+  onPhonemeSelectionChanged();
 }
 phonemeSelectBtn.onClick = openPhonemeDialog;
 
@@ -634,11 +578,7 @@ var MOUTH_AUTO_RULES = [
   { ch: "お", shapeIndex: 4 },
 ];
 
-var mouthMapPanel = tabLab.add(
-  "panel",
-  undefined,
-  "口形状マッピング (PSDToolKit互換)",
-);
+var mouthMapPanel = tabLab.add("panel", undefined, "口形状の割り当て");
 mouthMapPanel.orientation = "column";
 mouthMapPanel.alignChildren = ["fill", "top"];
 mouthMapPanel.alignment = ["fill", "top"];
@@ -648,8 +588,7 @@ mouthMapPanel.margins = 8;
 var mouthMapHint = mouthMapPanel.add(
   "statictext",
   undefined,
-  "選択→各行「割当」→「適用」。音素⇔口形は「現在を取込」→編集→「適用」で lab を再配置せず後から変更できます",
-  { multiline: true },
+  "各口形にレイヤーを「割当」→「適用」。音素⇔口形は編集して再「適用」で後から変更できます",
 );
 mouthMapHint.alignment = ["fill", "top"];
 
@@ -705,8 +644,13 @@ function applyMouthScroll(value) {
     var ph = MOUTH_SCROLL_H;
     var sbW = 14;
     var innerH = ph - m * 2;
-    // 中身の高さは子要素の合計で測る（伸縮・頭打ちに影響されない）
+    // 中身の高さは子要素の合計で測る（伸縮・頭打ちに影響されない）。
+    // 非表示タブでは子のサイズが未確定で 0 になり得るので、行数からの概算を下限にする
+    // （これがないと行が増えてもスクロールバーが出ないことがある）。
     var contentH = contentHeightOf(mouthRowsGroup);
+    var estH =
+      mouthRows.length * (BUTTON_HEIGHT + (mouthRowsGroup.spacing || 2));
+    if (contentH < estH) contentH = estH;
     var maxv = contentH - innerH;
     if (maxv < 0) maxv = 0;
     if (value === undefined || value === null || value < 0) value = 0;
@@ -770,37 +714,29 @@ function addMouthRow(label, preset, isClosed) {
   labelInput.helpTip = "口形の名前（自動割当・表示用。自由に変更可）";
 
   var csvInput = row.add("edittext", undefined, preset);
-  csvInput.preferredSize = [96, BUTTON_HEIGHT];
+  csvInput.preferredSize = [110, BUTTON_HEIGHT];
   csvInput.helpTip = "この口形で表示する音素（カンマ区切り）";
   csvInput.onChange = function () {
     refreshMouthCoverage();
   };
 
-  var closedCheck = row.add("checkbox", undefined, "閉");
-  closedCheck.value = !!isClosed;
-  closedCheck.helpTip =
-    "閉じ口: どの口形にも属さない音素（子音など）のときに表示";
-
   var assignBtn = row.add("button", undefined, "割当");
   assignBtn.preferredSize = [40, BUTTON_HEIGHT];
   assignBtn.helpTip = "アクティブコンポの選択レイヤーをこの口形に割当";
 
-  var clearBtn = row.add("button", undefined, "×");
-  clearBtn.preferredSize = [22, BUTTON_HEIGHT];
-  clearBtn.helpTip = "この口形の割当をクリア";
-
-  var delBtn = row.add("button", undefined, "行削除");
-  delBtn.preferredSize = [44, BUTTON_HEIGHT];
+  var delBtn = row.add("button", undefined, "×");
+  delBtn.preferredSize = [22, BUTTON_HEIGHT];
   delBtn.helpTip = "この口形の行を削除";
 
   var namesText = row.add("statictext", undefined, "（未割当）");
   namesText.alignment = ["fill", "center"];
 
+  // ん(閉) が唯一の閉じ口。閉じかどうかは内部フラグで固定（行ごとの編集はしない）。
   var rowData = {
     row: row,
     labelInput: labelInput,
     csvInput: csvInput,
-    closedCheck: closedCheck,
+    isClosed: !!isClosed,
     namesText: namesText,
     preset: preset,
     layers: [],
@@ -819,12 +755,7 @@ function addMouthRow(label, preset, isClosed) {
     }
     namesText.text = describeAssignedLayers(rowData.layers);
     namesText.helpTip = namesText.text;
-  };
-
-  clearBtn.onClick = function () {
-    rowData.layers = [];
-    namesText.text = "（未割当）";
-    namesText.helpTip = "";
+    refreshMouthCoverage();
   };
 
   delBtn.onClick = function () {
@@ -853,11 +784,16 @@ for (var msIdx = 0; msIdx < MOUTH_SHAPES.length; msIdx++) {
   );
 }
 
-var mouthAddRow = mouthMapPanel.add("group");
-mouthAddRow.orientation = "row";
-mouthAddRow.alignChildren = ["left", "center"];
-var mouthAddBtn = mouthAddRow.add("button", undefined, "＋口形を追加");
-mouthAddBtn.preferredSize = [110, BUTTON_HEIGHT];
+// 編集系（行追加・自動割当・初期化）を 1 行に、横幅 3 等分で
+var mouthEditBtnRow = mouthMapPanel.add("group");
+mouthEditBtnRow.orientation = "row";
+mouthEditBtnRow.alignment = ["fill", "top"];
+mouthEditBtnRow.alignChildren = ["fill", "center"];
+mouthEditBtnRow.spacing = 5;
+
+var mouthAddBtn = mouthEditBtnRow.add("button", undefined, "＋口形を追加");
+mouthAddBtn.alignment = ["fill", "center"];
+mouthAddBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthAddBtn.helpTip = "「あいうえおん」以外の口形（特殊口など）の行を追加";
 mouthAddBtn.onClick = function () {
   addMouthRow("", "", false);
@@ -866,41 +802,44 @@ mouthAddBtn.onClick = function () {
     refreshMouthScroll();
   } catch (e) {}
 };
+var mouthAutoBtn = mouthEditBtnRow.add("button", undefined, "自動割当");
+mouthAutoBtn.alignment = ["fill", "center"];
+mouthAutoBtn.preferredSize.height = BUTTON_HEIGHT;
+mouthAutoBtn.helpTip =
+  "選択レイヤー名に「あ/い/う/え/お/ん」が含まれていれば自動で割当";
+var mouthPresetBtn = mouthEditBtnRow.add("button", undefined, "プリセット");
+mouthPresetBtn.alignment = ["fill", "center"];
+mouthPresetBtn.preferredSize.height = BUTTON_HEIGHT;
+mouthPresetBtn.helpTip = "口形マッピングを初期状態（あ/い/う/え/お/ん）に戻す";
 
+// 実行系（適用・解除）
 var mouthMapBtnRow = mouthMapPanel.add("group");
 mouthMapBtnRow.orientation = "row";
 mouthMapBtnRow.alignment = ["fill", "top"];
 mouthMapBtnRow.alignChildren = ["fill", "center"];
 mouthMapBtnRow.spacing = 5;
 
-var mouthAutoBtn = mouthMapBtnRow.add("button", undefined, "自動割当");
-mouthAutoBtn.preferredSize.height = BUTTON_HEIGHT;
-mouthAutoBtn.helpTip =
-  "選択レイヤー名に「あ/い/う/え/お/ん/閉」が含まれていれば自動で割当";
-var mouthImportBtn = mouthMapBtnRow.add("button", undefined, "現在を取込");
-mouthImportBtn.preferredSize.height = BUTTON_HEIGHT;
-mouthImportBtn.helpTip =
-  "アクティブコンポの既存マッピング式（口パク設定済みレイヤー）を読み取って各行に反映";
-var mouthPresetBtn = mouthMapBtnRow.add("button", undefined, "プリセット");
-mouthPresetBtn.preferredSize.height = BUTTON_HEIGHT;
-mouthPresetBtn.helpTip = "口形マッピングを初期状態（あ/い/う/え/お/ん）に戻す";
 var mouthApplyBtn = mouthMapBtnRow.add("button", undefined, "適用");
+mouthApplyBtn.alignment = ["fill", "center"];
 mouthApplyBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthApplyBtn.helpTip =
   "割当済みレイヤーに不透明度エクスプレッションを設定（表情登録済みなら共存）";
 var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
+mouthRemoveBtn.alignment = ["fill", "center"];
 mouthRemoveBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthRemoveBtn.helpTip =
   "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
 
-// 口形カバレッジ警告: 「使う音素」のうち、どの口形にも未割当（＝閉じ口になる）ものを示す
-var mouthCoverageWarn = mouthMapPanel.add("statictext", undefined, "");
+// 口形カバレッジ警告: 音素の未割当（閉じ口になる）／口形のレイヤー未割当 を示す
+var mouthCoverageWarn = mouthMapPanel.add("statictext", undefined, "", {
+  multiline: true,
+});
 mouthCoverageWarn.alignment = ["fill", "top"];
 setCheckColor(mouthCoverageWarn, [0.95, 0.45, 0.15, 1]); // 立ち絵ツリーの ⚠ と同系色
 mouthCoverageWarn.visible = false;
 
-// 「使う音素」= lab読込中のチェック音素 ∪ 一括読み込みの音素入力（ベースライン）。
-// どちらも空なら母音+ん。lab と一括の指定が前後しても、両方をカバレッジ判定に含める。
+// 「使う音素」= 配置する音素（cfgImportPhonemes）。空＝すべての扱いなので、
+// 列挙できない代表として母音+ん（commonPhonemes）をカバレッジ判定に使う。
 function collectUsedPhonemes() {
   var out = [];
   var seen = {};
@@ -911,34 +850,40 @@ function collectUsedPhonemes() {
       out.push(p);
     }
   }
-  // lab 読込中: チェック中の音素（widget の外に持つ phonemeChecked から）
-  for (i = 0; i < phonemeCandidates.length; i++) {
-    if (phonemeChecked[phonemeCandidates[i].phoneme]) {
-      add(phonemeCandidates[i].phoneme);
-    }
-  }
-  // 一括読み込みの音素入力（＝使う音素のベースライン）も常に加える
-  var f = normalizeCsvTokens(bulkPhonemeInput.text);
+  var f = normalizeCsvTokens(cfgImportPhonemes);
   for (i = 0; i < f.length; i++) add(f[i]);
-  // どちらも空なら母音+ん
   if (out.length === 0) {
+    // 空＝すべて。代表として母音+ん
     for (i = 0; i < commonPhonemes.length; i++) add(commonPhonemes[i]);
   }
   return out;
 }
 
-// 口形マッピングのカバレッジを再計算して警告表示を更新する
+// 口形マッピングの警告を再計算して表示を更新する。2 種類を出す:
+//   1) 使う音素のうち、どの口形にも未割当（＝閉じ口になる）もの
+//   2) 音素はあるのにレイヤーが未割当の口形行（割り当て忘れ）
 function refreshMouthCoverage() {
   if (!mouthCoverageWarn) return; // UI 構築前のガード
   var mapped = [];
+  var noLayer = [];
   for (var r = 0; r < mouthRows.length; r++) {
     var toks = normalizeCsvTokens(mouthRows[r].csvInput.text);
     for (var t = 0; t < toks.length; t++) mapped.push(toks[t]);
+    if (toks.length > 0 && mouthRows[r].layers.length === 0) {
+      var lbl = mouthRows[r].labelInput.text.replace(/^\s+|\s+$/g, "");
+      noLayer.push(lbl.length > 0 ? lbl : toks.join("/"));
+    }
   }
   var unmapped = findUnmappedPhonemes(collectUsedPhonemes(), mapped);
+  var lines = [];
   if (unmapped.length > 0) {
-    mouthCoverageWarn.text =
-      "⚠ 口形に未割当（閉じ口になります）: " + unmapped.join(", ");
+    lines.push("⚠ 口形に未割当（閉じ口になります）: " + unmapped.join(", "));
+  }
+  if (noLayer.length > 0) {
+    lines.push("⚠ レイヤー未割当の口形: " + noLayer.join(", "));
+  }
+  if (lines.length > 0) {
+    mouthCoverageWarn.text = lines.join("\n");
     mouthCoverageWarn.visible = true;
   } else {
     mouthCoverageWarn.text = "";
@@ -965,10 +910,10 @@ mouthAutoBtn.onClick = function () {
   // 「閉」が母音より先にレイヤーを取れるようにする。
   var order = [];
   for (r = 0; r < mouthRows.length; r++) {
-    if (mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
+    if (mouthRows[r].isClosed) order.push(mouthRows[r]);
   }
   for (r = 0; r < mouthRows.length; r++) {
-    if (!mouthRows[r].closedCheck.value) order.push(mouthRows[r]);
+    if (!mouthRows[r].isClosed) order.push(mouthRows[r]);
   }
 
   // 1 レイヤーは 1 行までしか使わない（重複割当を防ぐ）
@@ -1061,83 +1006,6 @@ mouthPresetBtn.onClick = function () {
   refreshMouthCoverage();
 };
 
-// 現在のコンポの口パク設定済みレイヤーを読み取り、各行に取り込む(#K)
-mouthImportBtn.onClick = function () {
-  var comp = getActiveComp();
-  if (!comp) {
-    alert("口パク設定済みのレイヤーがあるコンポをアクティブにしてください。");
-    return;
-  }
-  // (csv|closed) ごとにレイヤーをまとめる
-  var groups = [];
-  var index = {};
-  var importedTag = "";
-  for (var i = 1; i <= comp.numLayers; i++) {
-    var layer = comp.layer(i);
-    var expr = "";
-    try {
-      expr = layer.transform.opacity.expression || "";
-    } catch (e) {
-      continue;
-    }
-    var parsed = parseLabMapExpression(expr);
-    if (!parsed) continue;
-    if (!importedTag && parsed.labTag) importedTag = parsed.labTag;
-    var keyTokens = normalizeCsvTokens(parsed.myCsv).join(",");
-    var key = (parsed.isClosedFallback ? "C|" : "O|") + keyTokens;
-    if (index[key] === undefined) {
-      index[key] = groups.length;
-      groups.push({
-        myCsv: keyTokens,
-        isClosedFallback: parsed.isClosedFallback,
-        layers: [],
-      });
-    }
-    groups[index[key]].layers.push(layer);
-  }
-
-  if (groups.length === 0) {
-    alert(
-      "このコンポに口パク設定済み（口形マッピング式）のレイヤーが見つかりませんでした。",
-    );
-    return;
-  }
-
-  // 取り込み: まず既定行へ、CSV/閉じが一致する行があればそこへ。
-  // 一致が無ければ新規行を追加する。既存の割当は上書きする。
-  resetMouthRowsToDefault();
-  mouthLabTagInput.text = importedTag; // 口パクタグも復元(#B/#K)
-  for (var g = 0; g < groups.length; g++) {
-    var grp = groups[g];
-    var grpTokens = normalizeCsvTokens(grp.myCsv).join(",");
-    var matched = null;
-    for (var r = 0; r < mouthRows.length; r++) {
-      var rowTokens = normalizeCsvTokens(mouthRows[r].csvInput.text).join(",");
-      if (
-        rowTokens === grpTokens &&
-        !!mouthRows[r].closedCheck.value === grp.isClosedFallback
-      ) {
-        matched = mouthRows[r];
-        break;
-      }
-    }
-    if (!matched) {
-      // ラベルは推測しづらいので CSV 先頭 or "口形N" を仮ラベルに
-      var guessLabel = grpTokens ? grpTokens.split(",")[0] : "口形";
-      matched = addMouthRow(guessLabel, grp.myCsv, grp.isClosedFallback);
-    }
-    matched.layers = grp.layers.slice(0);
-    matched.namesText.text = describeAssignedLayers(matched.layers);
-    matched.namesText.helpTip = matched.namesText.text;
-  }
-  try {
-    mouthMapPanel.layout.layout(true);
-    refreshMouthScroll();
-  } catch (eL) {}
-  refreshMouthCoverage();
-  alert("現在のマッピングを取り込みました（" + groups.length + " 口形）。");
-};
-
 mouthApplyBtn.onClick = function () {
   // 全口形の音素を集約（閉じ口の「未割当音素→閉じ」判定に使用）
   var allTokens = [];
@@ -1174,7 +1042,7 @@ mouthApplyBtn.onClick = function () {
   for (var i = 0; i < mouthRows.length; i++) {
     var row = mouthRows[i];
     var myCsv = row.tokens.join(",");
-    var isClosedFallback = !!row.closedCheck.value;
+    var isClosedFallback = row.isClosed;
     for (var j = 0; j < row.layers.length; j++) {
       items.push({
         layer: row.layers[j],
@@ -1419,7 +1287,7 @@ createBtn.onClick = function () {
   var selectedPhonemes = [];
   for (var i = 0; i < phonemeCandidates.length; i++) {
     var cand = phonemeCandidates[i];
-    if (!phonemeChecked[cand.phoneme]) continue;
+    if (cand.count <= 0 || !isPhonemeSelected(cand.phoneme)) continue;
 
     var times = cand.data && cand.data.times ? cand.data.times : [];
     for (var j = 0; j < times.length; j++) {

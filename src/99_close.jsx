@@ -45,6 +45,9 @@ win.onActivate = function () {
   refreshPhonemeChecklist(); // 一般音素(baseline)を最初から表示
   refreshMouthScroll();
   refreshMouthCoverage();
+  // 初期表示はセットアップタブなので、共通の下部ステータスもその案内にする
+  // （refreshStage が立ち絵向けの文言を入れた後に上書き）
+  statusText.text = "PSD のルートコンポを選択してください。";
 })();
 
 if (win instanceof Window) {

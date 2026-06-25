@@ -26,13 +26,10 @@ stageRootDropdown.preferredSize.height = BUTTON_HEIGHT;
 stageRootDropdown.helpTip =
   "立ち絵のルートコンポ（セットアップタブで読み込んだコンポ）";
 
-var stageRefreshBtn = stageTopRow.add("button", undefined, "更新");
-stageRefreshBtn.preferredSize = [52, BUTTON_HEIGHT];
+var stageRefreshBtn = stageTopRow.add("button", undefined, "↺");
+stageRefreshBtn.preferredSize = [28, BUTTON_HEIGHT];
 stageRefreshBtn.helpTip =
   "コンポ一覧・階層・現在状態を再取得（再生ヘッド移動後に押す）";
-
-var stageHelpBtn = stageTopRow.add("button", undefined, "ヘルプ");
-stageHelpBtn.preferredSize = [52, BUTTON_HEIGHT];
 
 // ── 反転（立ち絵全体を Scale でミラー。左右/上下を独立トグル） ──
 var stageFlipRow = tabStage.add("group");
@@ -96,8 +93,8 @@ var stageTreeHint = stageTreeBarRow.add(
   "再生ヘッドを動かしたら →",
 );
 stageTreeHint.alignment = ["fill", "center"];
-var stageRefreshBtn2 = stageTreeBarRow.add("button", undefined, "更新");
-stageRefreshBtn2.preferredSize = [80, BUTTON_HEIGHT];
+var stageRefreshBtn2 = stageTreeBarRow.add("button", undefined, "↺");
+stageRefreshBtn2.preferredSize = [40, BUTTON_HEIGHT];
 stageRefreshBtn2.helpTip = "現在の再生ヘッド位置の表示状態を取り込んで反映";
 
 var stageGridPanel = tabStage.add("panel");
@@ -113,12 +110,8 @@ stageGrid.spacing = GRID_SPACING;
 var stageScroll = stageGridPanel.add("scrollbar", undefined, 0, 0, 100);
 stageScroll.visible = false;
 
-var stageStatusText = tabStage.add(
-  "statictext",
-  undefined,
-  "立ち絵ルートコンポを選択してください。",
-);
-stageStatusText.alignment = ["fill", "bottom"];
+// 下部の状態表示はウィンドウ共通の statusText を使う（バージョンと同じ行）
+var stageStatusText = statusText;
 
 // ── 状態 ──
 var stageNodes = [];
@@ -606,13 +599,13 @@ function availHeightForPanel(panel, topTab) {
     avail = win.size ? win.size.height : 0;
   } catch (eW) {}
   if (!avail) avail = 560;
-  // ウィンドウ枠のオーバーヘッド（マージン + バージョン行 + タブバー）
+  // ウィンドウ枠のオーバーヘッド（マージン + 下部バー(状態+版) + タブバー）
   try {
     avail -= (win.margins.top || 0) + (win.margins.bottom || 0);
   } catch (eM) {}
   try {
-    if (versionRow && versionRow.visible && versionRow.size) {
-      avail -= versionRow.size.height;
+    if (statusRow && statusRow.visible && statusRow.size) {
+      avail -= statusRow.size.height;
     }
   } catch (eV) {}
   avail -= 28; // タブバー（tabbedpanel のタブ見出し）+ 下要素との安全余白
@@ -983,10 +976,6 @@ stageRefreshBtn.onClick = function () {
 stageRefreshBtn2.onClick = function () {
   refreshStage(false);
   setStageStatus("現在の再生ヘッド位置の状態を取り込みました。");
-};
-
-stageHelpBtn.onClick = function () {
-  showStageHelpDialog();
 };
 
 stageRootDropdown.onChange = function () {

@@ -82,20 +82,23 @@ var psdPrefixHint = psdPrefixPanel.add(
 psdPrefixHint.alignment = ["fill", "top"];
 var psdPrefixRow = psdPrefixPanel.add("group");
 psdPrefixRow.orientation = "row";
-psdPrefixRow.alignChildren = ["left", "center"];
+psdPrefixRow.alignment = ["fill", "top"];
+psdPrefixRow.alignChildren = ["fill", "center"];
 psdPrefixRow.spacing = 5;
-// 3 ボタンは同じ固定幅・同じ高さで揃える（一番長い「* 排他(ラジオ)」が収まる幅）
-var PREFIX_BTN_W = 116;
+// 3 ボタンは横幅 3 等分（fill）で揃える
 var psdAddStarBtn = psdPrefixRow.add("button", undefined, "* 排他(ラジオ)");
-psdAddStarBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
+psdAddStarBtn.alignment = ["fill", "center"];
+psdAddStarBtn.preferredSize.height = BUTTON_HEIGHT;
 psdAddStarBtn.helpTip =
   "選択レイヤーに * を付与（兄弟内で排他＝ラジオ選択）。既存の * / ! は置換";
 var psdAddBangBtn = psdPrefixRow.add("button", undefined, "! 強制表示");
-psdAddBangBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
+psdAddBangBtn.alignment = ["fill", "center"];
+psdAddBangBtn.preferredSize.height = BUTTON_HEIGHT;
 psdAddBangBtn.helpTip =
   "選択レイヤーに ! を付与（常に表示）。既存の * / ! は置換";
 var psdStripBtn = psdPrefixRow.add("button", undefined, "prefix除去");
-psdStripBtn.preferredSize = [PREFIX_BTN_W, BUTTON_HEIGHT];
+psdStripBtn.alignment = ["fill", "center"];
+psdStripBtn.preferredSize.height = BUTTON_HEIGHT;
 psdStripBtn.helpTip = "選択レイヤーの先頭の * / ! を除去（無印＝任意指定に）";
 
 // 選択レイヤーの先頭 prefix を mode("*"/"!"/"") に付け替える
@@ -166,17 +169,21 @@ var psdExtendHint = psdExtendPanel.add(
 psdExtendHint.alignment = ["fill", "top"];
 var psdExtendRow = psdExtendPanel.add("group");
 psdExtendRow.orientation = "row";
+psdExtendRow.alignment = ["fill", "top"];
 psdExtendRow.alignChildren = ["left", "center"];
 psdExtendRow.spacing = 5;
 psdExtendRow.add("statictext", undefined, "長さ(秒)");
 var psdExtendInput = psdExtendRow.add("edittext", undefined, "");
 psdExtendInput.preferredSize = [70, BUTTON_HEIGHT];
 psdExtendInput.helpTip = "伸ばしたい長さ（秒）。既定はアクティブなコンポの長さ";
+// ボタンは残り幅を等分（fill）
 var psdExtendActiveBtn = psdExtendRow.add("button", undefined, "アクティブの長さ");
-psdExtendActiveBtn.preferredSize = [104, BUTTON_HEIGHT];
+psdExtendActiveBtn.alignment = ["fill", "center"];
+psdExtendActiveBtn.preferredSize.height = BUTTON_HEIGHT;
 psdExtendActiveBtn.helpTip = "アクティブなコンポの長さを入力欄に入れる";
 var psdExtendBtn = psdExtendRow.add("button", undefined, "適用");
-psdExtendBtn.preferredSize = [56, BUTTON_HEIGHT];
+psdExtendBtn.alignment = ["fill", "center"];
+psdExtendBtn.preferredSize.height = BUTTON_HEIGHT;
 psdExtendBtn.helpTip =
   "選択レイヤーの outPoint と、参照先コンポ・配下の尺をこの長さまで伸ばす（未選択時は何もしない）";
 
@@ -608,12 +615,8 @@ indentInput.onChange = function () {
   refreshStage(false);
 };
 
-var psdStatusText = tabPsd.add(
-  "statictext",
-  undefined,
-  "PSD のルートコンポを選択してください。",
-);
-psdStatusText.alignment = ["fill", "bottom"];
+// 下部の状態表示はウィンドウ共通の statusText を使う（バージョンと同じ行）
+var psdStatusText = statusText;
 
 function refreshPsdDropdowns() {
   var rootCur = psdRootRow.dropdown.selection
