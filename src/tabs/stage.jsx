@@ -59,7 +59,8 @@ function onStageFlipToggle() {
 }
 cbFlipX.onClick = onStageFlipToggle;
 cbFlipY.onClick = onStageFlipToggle;
-stageFlipRow.visible = false;
+// 立ち絵未設定のうちは表示したままグレーアウト（無効化）する
+stageFlipRow.enabled = false;
 
 // 表情セット（ツリーの上に配置）
 var stageSetPanel = tabStage.add("panel", undefined, "表情セット (一括切替)");
@@ -955,8 +956,8 @@ function refreshStage(rebuildDropdownToo) {
 
   setCheckState(stageCtrlInfo, stageNodes.length > 0);
 
-  // 反転は立ち絵があれば常に使える（単純な Scale ミラー）
-  stageFlipRow.visible = stageNodes.length > 0;
+  // 反転は立ち絵があるときだけ有効。未設定時は表示したまま無効（グレーアウト）。
+  stageFlipRow.enabled = stageNodes.length > 0;
   // 反転状態はルートコンポの comment が真実（再読込しても保持）
   stageFlipState = readFlipState(rootComp);
   cbFlipX.value = flipHasX(stageFlipState);
