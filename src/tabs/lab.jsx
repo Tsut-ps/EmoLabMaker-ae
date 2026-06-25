@@ -589,7 +589,7 @@ mouthLabTagInput.helpTip =
 // 口形の行はこのクリップ領域に動的に追加する。行が増えても隠れないよう
 // 縦スクロール対応にし、追加/削除ボタンは常に下に残す(#C)。
 // 口パクは固定高さ + スクロールバー（リサイズ・追加で壊れないシンプル方式）。
-var MOUTH_SCROLL_H = 130;
+var MOUTH_SCROLL_H = 178; // 約7行ぶん（あいうえおん＋追加2行程度まで見える高さ）
 var mouthRowsClip = mouthMapPanel.add("panel");
 mouthRowsClip.alignment = ["fill", "top"];
 mouthRowsClip.margins = 2;
@@ -655,9 +655,12 @@ function applyMouthScroll(value) {
   } catch (e) {}
 }
 function refreshMouthScroll() {
+  // クリップ枠の実寸幅を使うため、先に親パネルまでレイアウトを確定させてから測る
+  // （タブ表示直後はウィンドウ幅が未確定で、スクロールバーが枠外に出て見えないことがある）。
   try {
     mouthRowsGroup.layout.layout(true);
     mouthRowsClip.layout.layout(true);
+    mouthMapPanel.layout.layout(true);
   } catch (e) {}
   applyMouthScroll(mouthRowsScrollValue);
 }

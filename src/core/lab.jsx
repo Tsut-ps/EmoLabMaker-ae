@@ -169,10 +169,14 @@ function writeLabMarkers(
     if (maxEndRel === null || endRel > maxEndRel) maxEndRel = endRel;
   }
 
+  // ラボ終了の絶対時刻（発話の最後＝最大 endTime）。ヌルの尺合わせに使う。
+  var endTime = null;
+  if (maxEndRel !== null) endTime = attachTime + maxEndRel + offsetSec;
+
   // ラボ終了が明確なら、その時刻に閉じ音素を打って発話後に口を閉じる
   var autoClosed = false;
   if (autoClose && firstTime !== null && maxEndRel !== null) {
-    var closeTime = attachTime + maxEndRel + offsetSec;
+    var closeTime = endTime;
     if (closeTime > lastTime + MARKER_EPSILON) {
       targetLayer
         .property("Marker")
@@ -180,7 +184,7 @@ function writeLabMarkers(
       autoClosed = true;
     }
   }
-  return { autoClosed: autoClosed };
+  return { autoClosed: autoClosed, endTime: endTime };
 }
 
 // テキストファイルを読む（UTF-8 優先。SJIS 等は文字化けし得る＝簡易版）
@@ -238,7 +242,7 @@ function placeLabFileOnLayer(
   if (targetLayer.name.indexOf("[Lab] ") !== 0) {
     targetLayer.name = "[Lab] " + base;
   }
-  writeLabMarkers(
+  var res = writeLabMarkers(
     targetLayer,
     attachTime,
     phs[0].startTime,
@@ -246,6 +250,13 @@ function placeLabFileOnLayer(
     offsetSec,
     autoClose,
   );
+  // 新規ヌル（音声なしの lab 単体）は、ヌルの尺を lab の終了に合わせる。
+  // 音声/映像レイヤー（B方式や wav 付き）はソースの尺を保つため触らない。
+  try {
+    if (targetLayer.nullLayer && res.endTime != null) {
+      if (res.endTime > targetLayer.inPoint) targetLayer.outPoint = res.endTime;
+    }
+  } catch (eDur) {}
   return true;
 }
 

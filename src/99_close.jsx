@@ -29,6 +29,11 @@ win.onActivate = function () {
   try {
     if (cfgFollowPlayhead && tabs.selection === tabStage) syncStageControls();
   } catch (e) {}
+  // パネルがアクティブになった時点ではウィンドウ幅が確定しているので、
+  // 口パクの口形スクロールを測り直す（タブ表示直後に幅が遅れて出ない対策）。
+  try {
+    if (tabs.selection === tabLab) refreshMouthScroll();
+  } catch (e2) {}
 };
 
 // ════════════════════════════════════════════════════════════════
