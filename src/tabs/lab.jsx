@@ -612,19 +612,15 @@ var mouthRows = [];
 function applyMouthScroll(value) {
   try {
     var m = 2;
-    // 口パクは固定高さ + スクロールバー。高さは固定値（クリップ枠の高さ）。
-    // スクロールバーの横位置は「クリップ枠の実寸幅」を使う。ウィンドウ由来の
-    // 推定幅(availWidthForPanel)だと実幅より広く見積もったとき、スクロールバーが
-    // 右端の外に出て見えなくなるため（＝今回の不具合）。実寸が取れなければ推定で代替。
-    var clipW = 0;
-    try {
-      if (mouthRowsClip.size && mouthRowsClip.size.width) {
-        clipW = mouthRowsClip.size.width;
-      }
-    } catch (eW0) {}
-    if (!clipW || clipW < 40) clipW = availWidthForPanel(mouthRowsClip, tabLab);
-    var pw = clipW;
+    // 幅はウィンドウから算出し、クリップ枠を「その幅」に固定してからスクロールバーを
+    // 置く。パネル自身の size を読むと、タブ表示/リサイズ直後は古い値のままで、バーが
+    // 枠外に出て見えなくなる（＝今回の不具合）。stage タブと同じ「ウィンドウ由来の幅
+    // ＋ size 固定」方式にして安定させる。高さは固定値。
+    var pw = availWidthForPanel(mouthRowsClip, tabLab);
     var ph = MOUTH_SCROLL_H;
+    try {
+      mouthRowsClip.size = [pw, ph];
+    } catch (ePh) {}
     var sbW = 14;
     var innerH = ph - m * 2;
     // 中身の高さは子要素の合計で測る（伸縮・頭打ちに影響されない）。
