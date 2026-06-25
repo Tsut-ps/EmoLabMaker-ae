@@ -273,9 +273,11 @@ function rebuildStageTree() {
       var empty = stageGrid.add(
         "statictext",
         undefined,
-        "階層が見つかりません。セットアップタブでセットアップしたコンポをルートに選んでください。",
+        "階層なし。セットアップ済みコンポを選択",
       );
       empty.alignment = ["fill", "top"];
+      empty.helpTip =
+        "セットアップタブでセットアップしたコンポをルートに選んでください。";
       stageGrid.layout.layout(true);
       stageGridPanel.layout.layout(true);
       applyStageScroll(0);

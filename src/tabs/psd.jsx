@@ -24,7 +24,7 @@ psdGuide.add(
 psdGuide.add(
   "statictext",
   undefined,
-  "ファイル > 読み込み > 「コンポジション - レイヤーサイズを維持」推奨",
+  "読み込みは「コンポジション」で（レイヤー維持推奨）",
 );
 
 function addPsdCompRow(labelText) {
@@ -77,9 +77,11 @@ psdPrefixPanel.spacing = 4;
 var psdPrefixHint = psdPrefixPanel.add(
   "statictext",
   undefined,
-  "アクティブコンポで選択中のレイヤー名に * / ! を付与します（付与後は再セットアップ）",
+  "選択レイヤー名に * / ! を付与（後で再設定）",
 );
 psdPrefixHint.alignment = ["fill", "top"];
+psdPrefixHint.helpTip =
+  "アクティブコンポで選択中のレイヤー名の先頭に * / ! を付与します。付与後は「解析してセットアップ / 更新」を実行してください。";
 var psdPrefixRow = psdPrefixPanel.add("group");
 psdPrefixRow.orientation = "row";
 psdPrefixRow.alignment = ["fill", "top"];
@@ -137,9 +139,7 @@ function applyPsdPrefix(mode) {
   } finally {
     endUndo();
   }
-  psdStatusText.text =
-    count +
-    " レイヤーの名前を変更しました。表情切替へ反映するには「解析してセットアップ / 更新」を実行してください。";
+  psdStatusText.text = count + " レイヤーをリネーム（要再セットアップ）";
 }
 psdAddStarBtn.onClick = function () {
   applyPsdPrefix("*");
@@ -164,9 +164,11 @@ psdExtendPanel.spacing = 4;
 var psdExtendHint = psdExtendPanel.add(
   "statictext",
   undefined,
-  "選択したレイヤーと、その参照コンポ・配下の尺を指定の長さまで伸ばします（縮めません／未選択時は何もしません）",
+  "選択レイヤーと参照コンポの尺を伸ばす（縮めない）",
 );
 psdExtendHint.alignment = ["fill", "top"];
+psdExtendHint.helpTip =
+  "選択したレイヤーと、その参照コンポ・配下の尺を指定の長さまで伸ばします（縮めません／未選択時は何もしません）。";
 var psdExtendRow = psdExtendPanel.add("group");
 psdExtendRow.orientation = "row";
 psdExtendRow.alignment = ["fill", "top"];
@@ -229,15 +231,7 @@ psdExtendBtn.onClick = function () {
     endUndo();
   }
   psdStatusText.text =
-    "尺を伸ばしました（" +
-    sec +
-    "秒）: レイヤー " +
-    res.layers +
-    " ・ コンポ " +
-    res.comps +
-    "（" +
-    comp.name +
-    "）。";
+    "尺を伸ばしました: レイヤー " + res.layers + " / コンポ " + res.comps;
 };
 
 // ══════════════════════════════════════════════════════════════════
@@ -628,14 +622,13 @@ function refreshPsdDropdowns() {
   rebuildPsdDropdown(psdRootRow.dropdown, rootCur);
   rebuildPsdDropdown(psdCtrlRow.dropdown, ctrlCur, collectCtrlCandidates());
   if (psdRootRow.dropdown.items.length === 0) {
-    psdStatusText.text =
-      "PSD 立ち絵コンポが見つかりません。PSD を「コンポジション」として読み込んでください。";
+    psdStatusText.text = "PSD 立ち絵コンポが見つかりません";
   }
 }
 
 psdRefreshBtn.onClick = function () {
   refreshPsdDropdowns();
-  psdStatusText.text = "コンポ一覧を更新しました（PSD 立ち絵ルート候補のみ）。";
+  psdStatusText.text = "コンポ一覧を更新しました";
 };
 
 // ルート変更時は制御コンポも同じものをデフォルトにする
@@ -687,7 +680,7 @@ psdSetupBtn.onClick = function () {
 
   showPsdReportDialog(report);
   psdStatusText.text =
-    "セットアップ完了: " +
+    "完了: " +
     report.groupCount +
     " グループ / 新規 " +
     report.registered +

@@ -87,7 +87,7 @@ bulkSiblingBtn.helpTip =
 bulkPanel.add(
   "statictext",
   undefined,
-  "テキストは UTF-8 のtxtをそのまま字幕レイヤーにします（連携は今後対応）",
+  "txt(UTF-8)はそのまま字幕レイヤーに",
 );
 
 // A方式: wav/txt/lab を複数選択して一括配置
@@ -382,7 +382,7 @@ function openPhonemeDialog() {
   dlg.add(
     "statictext",
     undefined,
-    "配置する音素をチェックしてください（ファイルにある音素は「a(3)」のように回数付き）:",
+    "配置する音素をチェック（数字は出現回数）:",
   );
 
   // チェックボックスを 3 列で並べる
@@ -569,9 +569,11 @@ mouthMapPanel.margins = 8;
 var mouthMapHint = mouthMapPanel.add(
   "statictext",
   undefined,
-  "各口形にレイヤーを「割当」→「適用」。音素⇔口形は編集して再「適用」で後から変更できます",
+  "各口形に「割当」→「適用」（編集して再適用も可）",
 );
 mouthMapHint.alignment = ["fill", "top"];
+mouthMapHint.helpTip =
+  "各口形にレイヤーを「割当」してから「適用」。音素⇔口形の対応は編集して再「適用」すれば lab を再配置せず後から変更できます。";
 
 // 口パクタグ: 立ち絵が複数あるとき、対象の [Lab] を名前で振り分ける(#B)
 var mouthTagRow = mouthMapPanel.add("group");
@@ -858,7 +860,7 @@ function refreshMouthCoverage() {
   var unmapped = findUnmappedPhonemes(collectUsedPhonemes(), mapped);
   var lines = [];
   if (unmapped.length > 0) {
-    lines.push("⚠ 口形に未割当（閉じ口になります）: " + unmapped.join(", "));
+    lines.push("⚠ 口形に未割当(閉じ口): " + unmapped.join(", "));
   }
   if (noLayer.length > 0) {
     lines.push("⚠ レイヤー未割当の口形: " + noLayer.join(", "));
