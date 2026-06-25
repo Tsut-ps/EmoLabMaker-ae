@@ -385,7 +385,7 @@ function openPhonemeDialog() {
     "配置する音素をチェック（数字は出現回数）:",
   );
 
-  // チェックボックスを 3 列で並べる
+  // チェックボックスを 5 列で並べる
   var listGroup = dlg.add("group");
   listGroup.orientation = "column";
   listGroup.alignChildren = ["fill", "top"];
@@ -432,7 +432,7 @@ function openPhonemeDialog() {
         : "このファイルには含まれていません（一般音素として候補表示）";
     boxes.push({ checkbox: cb, phoneme: item.phoneme });
     colCount++;
-    if (colCount >= 3) colCount = 0;
+    if (colCount >= 5) colCount = 0;
   }
 
   // 一括選択ボタン（ダイアログ内のチェックを操作。OK まで本体には書き戻さない）
