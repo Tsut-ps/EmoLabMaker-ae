@@ -538,18 +538,3 @@ function mouthMatchKeys(label) {
   if (keys.length === 0 && s) keys.push(s);
   return keys;
 }
-
-// 既存マッピング式から myPhonemes / isClosedFallback を取り出す（#K 取込用）
-function parseLabMapExpression(expr) {
-  if (!expr || expr.indexOf(LAB_MAP_SIGNATURE) < 0) return null;
-  var csv = "";
-  var m2 = expr.match(/var\s+myPhonemes\s*=\s*",([^"]*),"/);
-  if (m2) {
-    csv = m2[1];
-  }
-  var closed = /var\s+isClosedFallback\s*=\s*true/.test(expr);
-  var tag = "";
-  var mt = expr.match(/var\s+labTag\s*=\s*"([^"]*)"/);
-  if (mt) tag = mt[1];
-  return { myCsv: csv, isClosedFallback: closed, labTag: tag };
-}

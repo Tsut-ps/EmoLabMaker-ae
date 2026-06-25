@@ -288,16 +288,8 @@ var commonPhonemes = [
   "br",
 ];
 
-// 一括読み込みの「子音」ボタンで足す標準的な日本語子音（OpenJTalk/VOICEVOX系）。
-// 単体読込はファイル内の子音を直接拾うが、一括はファイル非依存なのでこの一覧を使う。
-var CONSONANT_PHONEMES = [
-  "k", "ky", "g", "gy", "s", "sh", "z", "j", "t", "ts", "ch", "d",
-  "n", "ny", "h", "hy", "f", "b", "by", "p", "py", "m", "my",
-  "y", "r", "ry", "w", "v",
-];
-
 // 最初から出しておく「おすすめ子音」（母音+ん＋特殊＝commonPhonemes と合わせて baseline）。
-// よく使う・口形を付けやすい子音に絞る（多すぎ防止。残りは「子音」ボタンで追加可能）。
+// よく使う・口形を付けやすい子音に絞る（多すぎ防止。残りはダイアログの「子音」で追加可能）。
 var RECOMMENDED_CONSONANTS = ["k", "s", "t", "n", "h", "m", "r", "w"];
 
 // 配置する音素の単一ソースは cfgImportPhonemes（CSV 文字列。空＝すべて）。
@@ -554,7 +546,7 @@ autoCloseCheck.onClick = function () {
   setSettingBool("labAutoClose", cfgLabAutoClose);
 };
 
-// ========== 口形状マッピング (PSDToolKit互換) ==========
+// ========== 口形状の割り当て (PSDToolKit互換) ==========
 // あ/い/う/え/お/ん の口形レイヤーに音素グループを割り当てる。
 // レイヤー名は変えずにエクスプレッションへ焼き込む方式
 
@@ -565,17 +557,6 @@ var MOUTH_SHAPES = [
   { label: "え", preset: "e" },
   { label: "お", preset: "o" },
   { label: "ん(閉)", preset: "N,cl,Q,pau,sil,br", closedFallback: true },
-];
-
-// 自動割当のヒューリスティック（先勝ち）。「閉」を「ん」より先に判定する
-var MOUTH_AUTO_RULES = [
-  { ch: "閉", shapeIndex: 5 },
-  { ch: "ん", shapeIndex: 5 },
-  { ch: "あ", shapeIndex: 0 },
-  { ch: "い", shapeIndex: 1 },
-  { ch: "う", shapeIndex: 2 },
-  { ch: "え", shapeIndex: 3 },
-  { ch: "お", shapeIndex: 4 },
 ];
 
 var mouthMapPanel = tabLab.add("panel", undefined, "口形状の割り当て");
