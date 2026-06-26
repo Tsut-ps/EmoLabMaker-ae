@@ -651,14 +651,15 @@ function applyMouthScroll(value) {
   } catch (e) {}
 }
 function refreshMouthScroll() {
-  // クリップ枠の実寸幅を使うため、先に親パネルまでレイアウトを確定させてから測る
-  // （タブ表示直後はウィンドウ幅が未確定で、スクロールバーが枠外に出て見えないことがある）。
+  // 幅はウィンドウから算出するので、ここでは中身の高さ測定用に行グループだけ確定させる。
+  // パネル全体の layout はスクロール位置をリセットしうるので呼ばない。
+  // 値はレイアウト前に控えて復元する（onChange で 0 に戻る対策）。
+  var keepScroll = mouthRowsScrollValue;
   try {
     mouthRowsGroup.layout.layout(true);
     mouthRowsClip.layout.layout(true);
-    mouthMapPanel.layout.layout(true);
   } catch (e) {}
-  applyMouthScroll(mouthRowsScrollValue);
+  applyMouthScroll(keepScroll);
 }
 mouthRowsScroll.onChanging = mouthRowsScroll.onChange = function () {
   try {
@@ -781,7 +782,9 @@ mouthAddBtn.onClick = function () {
   addMouthRow("", "", false);
   try {
     mouthMapPanel.layout.layout(true);
-    refreshMouthScroll();
+    mouthRowsGroup.layout.layout(true);
+    mouthRowsClip.layout.layout(true);
+    applyMouthScroll(1000000); // 末尾（追加した行）まで送って見えるようにする
   } catch (e) {}
 };
 var mouthAutoBtn = mouthEditBtnRow.add("button", undefined, "自動割当");
@@ -871,8 +874,13 @@ function refreshMouthCoverage() {
     mouthCoverageWarn.text = "";
     mouthCoverageWarn.visible = false;
   }
+  // パネル再レイアウトで中身(mouthRowsGroup)の位置が先頭に戻り、スクロールバーの
+  // onChange が走って値が 0 に戻ることがある。レイアウト前に控えた値で復元する
+  // （編集/割当/適用のたびに先頭へ飛ぶのを防ぐ）。
+  var keepScroll = mouthRowsScrollValue;
   try {
     mouthMapPanel.layout.layout(true);
+    applyMouthScroll(keepScroll);
   } catch (e) {}
 }
 
