@@ -569,10 +569,8 @@ function buildSubtitleExpression() {
     "  if (m.key(i).time > time) i--;",
     "  if (i >= 1) s = m.key(i).comment;",
     "}",
-    's = s.split("\\\\n").join("\\r");',
-    "var td = value;",
-    "td.text = s;",
-    "td;",
+    "// 文字列を返す（レイヤーの文字スタイルは保持される）。改行トークン \\n → 実改行(CR)",
+    's.split("\\\\n").join("\\r");',
   ].join("\n");
 }
 
