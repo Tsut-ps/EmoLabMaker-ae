@@ -576,10 +576,19 @@ function buildSubtitleExpression() {
   ].join("\n");
 }
 
+// Source Text プロパティを matchName で取得する。"Source Text" は「テキスト」グループの
+// 配下にあり、名前もローカライズされる（日本語版＝ソーステキスト）ため、レイヤー直下の
+// property("Source Text") では取れない（＝字幕が反映されない原因）。matchName は不変。
+function getSourceTextProp(layer) {
+  return layer
+    .property("ADBE Text Properties")
+    .property("ADBE Text Document");
+}
+
 // テキストレイヤーに字幕式が無ければ付与する。初回は既存の静的本文を inPoint に
 // 種マーカーとして残し、式適用直後に空白化するのを防ぐ。
 function ensureSubtitleExpression(layer) {
-  var prop = layer.property("Source Text");
+  var prop = getSourceTextProp(layer);
   var expr = "";
   try {
     expr = prop.expression || "";
