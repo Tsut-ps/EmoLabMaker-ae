@@ -27,12 +27,6 @@ function isCommonPhoneme(name) {
   return false;
 }
 
-// 子音か（母音 a/i/u/e/o や ん・無音・閉じ系＝commonPhonemes 以外の音素）。
-// k/s/t/n/h/m/y/r/w や ch/sh/ky… など、ファイルに出てくる子音を拾うのに使う。
-function isConsonantPhoneme(name) {
-  return !!name && !isCommonPhoneme(name);
-}
-
 // usedPhonemes（配置する＝使う音素）のうち、mappedPhonemes（どこかの口形に割当済み
 // の音素の集合）に含まれないものを返す。これらは口形未割当＝閉じ口になるため、
 // 口形状マッピングのカバレッジ警告に使う。重複は除く。

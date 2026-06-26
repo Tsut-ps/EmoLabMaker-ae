@@ -450,10 +450,8 @@ function openPhonemeDialog() {
   selRow.spacing = 5;
   var dAllBtn = selRow.add("button", undefined, "すべて");
   var dCommonBtn = selRow.add("button", undefined, "母音+ん");
-  var dConsonantBtn = selRow.add("button", undefined, "子音");
   var dNoneBtn = selRow.add("button", undefined, "解除");
   dCommonBtn.helpTip = "母音・ん・無音/閉じ系を選択（基本はこれでOK）";
-  dConsonantBtn.helpTip = "子音(k/s/t…)も追加でチェック（より細かい口の動き）";
   dAllBtn.onClick = function () {
     selectInDialog(function () {
       return true;
@@ -467,11 +465,6 @@ function openPhonemeDialog() {
   dCommonBtn.onClick = function () {
     selectInDialog(function (p) {
       return isCommonPhoneme(p);
-    });
-  };
-  dConsonantBtn.onClick = function () {
-    selectInDialog(function (p, cur) {
-      return cur || isConsonantPhoneme(p);
     });
   };
 
