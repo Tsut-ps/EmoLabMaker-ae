@@ -52,7 +52,7 @@ var bulkHint = bulkPanel.add(
 );
 bulkHint.alignment = ["fill", "top"];
 bulkHint.helpTip =
-  "wav は音声レイヤー、lab は口パクマーカーとして常に配置。txt は装飾済みテキストを1つ選択しているときだけ、その Source Text に字幕（マーカー＝本文）として付与します（未選択なら txt はスキップ）。";
+  "wav は音声レイヤー、lab は口パクマーカーとして常に配置。txt は装飾済みテキストを1つ選択しているときだけ、その Source Text に字幕（ホールドキーフレーム＝本文）として付与します。発話の終わりで空白に戻ります（未選択なら txt はスキップ）。エクスプレッションではなくキーフレームなのでプレビューが軽い。";
 
 // 配置する音素は「音素マーカー (lab)」パネルの『音素:』欄（単体配置と共通）。
 // 一括もそこで指定した cfgImportPhonemes（空＝すべて）で絞り込む。
@@ -209,10 +209,10 @@ bulkSiblingBtn.onClick = function () {
       if (subtitleLayer && txtF.exists) {
         var txt = readTextFileBestEffort(txtF);
         if (txt.length > 0) {
-          applySubtitleMarker(subtitleLayer, attach, txt);
+          applySubtitleKeyframe(subtitleLayer, attach, txt);
           // 音声の長さの終わり（outPoint）で字幕を空白に戻す
           if (layer.outPoint > attach) {
-            applySubtitleMarker(subtitleLayer, layer.outPoint, "");
+            applySubtitleKeyframe(subtitleLayer, layer.outPoint, "");
           }
           txtCount++;
           any = true;
