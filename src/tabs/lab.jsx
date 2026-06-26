@@ -546,6 +546,165 @@ autoCloseCheck.onClick = function () {
   setSettingBool("labAutoClose", cfgLabAutoClose);
 };
 
+// ========== 字幕（選択テキストを時間で差し替え） ==========
+// 装飾済みテキストを選び、Source Text に式を付与。レイヤー自身のマーカー
+// （コメント＝本文）で時間ごとに中身を切替える（スタイル保持・改行は \n）。
+var subtitlePanel = tabLab.add("panel", undefined, "字幕 (選択テキスト)");
+subtitlePanel.orientation = "column";
+subtitlePanel.alignChildren = ["fill", "top"];
+subtitlePanel.alignment = ["fill", "top"];
+subtitlePanel.spacing = 4;
+subtitlePanel.margins = 8;
+
+var subtitleHint = subtitlePanel.add(
+  "statictext",
+  undefined,
+  "装飾テキストを選び、再生位置ごとに本文を追加（改行は \\n）",
+);
+subtitleHint.alignment = ["fill", "top"];
+subtitleHint.helpTip =
+  "選択した装飾済みテキストレイヤーの Source Text に式を付け、マーカー（コメント＝本文）で時間ごとに中身を差し替えます。フォント/色などのスタイルは保持。改行は \\n。前半/後半で分けるときは区切り位置でもう一度追加します。";
+
+var subtitleInputRow = subtitlePanel.add("group");
+subtitleInputRow.orientation = "row";
+subtitleInputRow.alignment = ["fill", "top"];
+subtitleInputRow.alignChildren = ["fill", "center"];
+subtitleInputRow.spacing = 4;
+var subtitleInput = subtitleInputRow.add("edittext", undefined, "");
+subtitleInput.alignment = ["fill", "center"];
+subtitleInput.preferredSize.height = BUTTON_HEIGHT;
+subtitleInput.helpTip = "字幕本文（改行は \\n）。空のまま追加すると空字幕＝消す用";
+var subtitleAddBtn = subtitleInputRow.add("button", undefined, "現在位置に追加");
+subtitleAddBtn.preferredSize = [100, BUTTON_HEIGHT];
+subtitleAddBtn.alignment = ["right", "center"];
+
+var subtitleBtnRow = subtitlePanel.add("group");
+subtitleBtnRow.orientation = "row";
+subtitleBtnRow.alignment = ["fill", "top"];
+subtitleBtnRow.alignChildren = ["fill", "center"];
+subtitleBtnRow.spacing = 5;
+var subtitleDelBtn = subtitleBtnRow.add("button", undefined, "ここの字幕を削除");
+subtitleDelBtn.alignment = ["fill", "center"];
+subtitleDelBtn.preferredSize.height = BUTTON_HEIGHT;
+subtitleDelBtn.helpTip = "再生位置にある字幕マーカーを削除";
+var subtitleBakeBtn = subtitleBtnRow.add("button", undefined, "解除（確定）");
+subtitleBakeBtn.alignment = ["fill", "center"];
+subtitleBakeBtn.preferredSize.height = BUTTON_HEIGHT;
+subtitleBakeBtn.helpTip =
+  "字幕式を外し、現在表示中の本文を静的テキストとして焼き込む";
+
+// 選択中の最初のテキストレイヤーを返す（無ければ alert して null）
+function getSelectedTextLayer() {
+  var comp = getActiveComp();
+  if (!comp) {
+    alert("コンポジションを開いてください");
+    return null;
+  }
+  var sel = comp.selectedLayers;
+  for (var i = 0; i < sel.length; i++) {
+    if (sel[i] instanceof TextLayer) return sel[i];
+  }
+  alert("装飾済みのテキストレイヤーを1つ選択してください");
+  return null;
+}
+
+// 字幕式が無ければ付与（初回は既存の静的本文を inPoint に種マーカーとして残す）
+function ensureSubtitleExpression(layer) {
+  var prop = layer.property("Source Text");
+  var expr = "";
+  try {
+    expr = prop.expression || "";
+  } catch (e) {}
+  if (expr.indexOf(SUBTITLE_SIGNATURE) >= 0) return;
+  var mk = layer.property("Marker");
+  if (mk.numKeys === 0) {
+    var cur = "";
+    try {
+      cur = prop.value.text;
+    } catch (e2) {}
+    if (cur && cur.length > 0) {
+      mk.setValueAtTime(
+        layer.inPoint,
+        new MarkerValue(escapeSubtitleText(cur)),
+      );
+    }
+  }
+  prop.expression = buildSubtitleExpression();
+}
+
+subtitleAddBtn.onClick = function () {
+  var layer = getSelectedTextLayer();
+  if (!layer) return;
+  var comp = layer.containingComp;
+  beginUndo("emoSubtitle: 字幕を追加");
+  try {
+    ensureSubtitleExpression(layer);
+    layer
+      .property("Marker")
+      .setValueAtTime(
+        comp.time,
+        new MarkerValue(escapeSubtitleText(subtitleInput.text)),
+      );
+  } finally {
+    endUndo();
+  }
+  subtitleInput.text = "";
+};
+
+subtitleDelBtn.onClick = function () {
+  var layer = getSelectedTextLayer();
+  if (!layer) return;
+  var comp = layer.containingComp;
+  var mk = layer.property("Marker");
+  if (mk.numKeys === 0) {
+    alert("字幕マーカーがありません");
+    return;
+  }
+  var idx = mk.nearestKey(comp.time).index;
+  if (Math.abs(mk.keyTime(idx) - comp.time) > 0.05) {
+    alert("再生位置に字幕マーカーがありません（近くに移動してください）");
+    return;
+  }
+  beginUndo("emoSubtitle: 字幕を削除");
+  try {
+    mk.removeKey(idx);
+  } finally {
+    endUndo();
+  }
+};
+
+subtitleBakeBtn.onClick = function () {
+  var layer = getSelectedTextLayer();
+  if (!layer) return;
+  var comp = layer.containingComp;
+  var prop = layer.property("Source Text");
+  var expr = "";
+  try {
+    expr = prop.expression || "";
+  } catch (e) {}
+  if (expr.indexOf(SUBTITLE_SIGNATURE) < 0) {
+    alert("このテキストは字幕式ではありません");
+    return;
+  }
+  // 現在表示中の本文を解決して静的に焼き込む
+  var resolved = "";
+  var mk = layer.property("Marker");
+  if (mk.numKeys > 0) {
+    var i = mk.nearestKey(comp.time).index;
+    if (mk.keyTime(i) > comp.time) i--;
+    if (i >= 1) resolved = unescapeSubtitleText(mk.keyValue(i).comment);
+  }
+  beginUndo("emoSubtitle: 字幕を確定");
+  try {
+    prop.expression = "";
+    var td = prop.value;
+    td.text = resolved;
+    prop.setValue(td);
+  } finally {
+    endUndo();
+  }
+};
+
 // ========== 口形状の割り当て (PSDToolKit互換) ==========
 // あ/い/う/え/お/ん の口形レイヤーに音素グループを割り当てる。
 // レイヤー名は変えずにエクスプレッションへ焼き込む方式

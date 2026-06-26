@@ -549,3 +549,41 @@ function mouthMatchKeys(label) {
   if (keys.length === 0 && s) keys.push(s);
   return keys;
 }
+
+// ════════════════════════════════════════════════════════════════
+// 字幕（装飾テキストの Source Text を時間で差し替える）
+// ════════════════════════════════════════════════════════════════
+// 装飾済みテキストレイヤーの Source Text に式を付け、レイヤー自身のマーカー
+// （コメント＝本文）を時間ごとに読んで中身を差し替える。スタイルは保持。
+// 改行はマーカーコメントに持たせにくいので "\n" トークンで保持し、式/取り出しで実改行へ。
+
+// 実改行 → "\n" トークン（マーカーコメント保存用）
+function escapeSubtitleText(s) {
+  return String(s == null ? "" : s).replace(/\r\n|\r|\n/g, "\\n");
+}
+
+// "\n" トークン → 実改行(CR)。AE テキストの改行は \r。
+function unescapeSubtitleText(s) {
+  return String(s == null ? "" : s)
+    .split("\\n")
+    .join("\r");
+}
+
+// Source Text 用エクスプレッション。value(=元の装飾済み TextDocument)の text だけ
+// 差し替えて返すので、フォント/色/縁などのスタイルは保持される。
+function buildSubtitleExpression() {
+  return [
+    "// " + SUBTITLE_SIGNATURE,
+    "var m = thisLayer.marker;",
+    'var s = "";',
+    "if (m.numKeys > 0) {",
+    "  var i = m.nearestKey(time).index;",
+    "  if (m.key(i).time > time) i--;",
+    "  if (i >= 1) s = m.key(i).comment;",
+    "}",
+    's = s.split("\\\\n").join("\\r");',
+    "var td = value;",
+    "td.text = s;",
+    "td;",
+  ].join("\n");
+}
