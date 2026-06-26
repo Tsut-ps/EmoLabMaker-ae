@@ -210,6 +210,10 @@ bulkSiblingBtn.onClick = function () {
         var txt = readTextFileBestEffort(txtF);
         if (txt.length > 0) {
           applySubtitleMarker(subtitleLayer, attach, txt);
+          // 音声の長さの終わり（outPoint）で字幕を空白に戻す
+          if (layer.outPoint > attach) {
+            applySubtitleMarker(subtitleLayer, layer.outPoint, "");
+          }
           txtCount++;
           any = true;
         }

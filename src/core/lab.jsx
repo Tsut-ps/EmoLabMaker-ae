@@ -254,6 +254,26 @@ function placeLabFileOnLayer(
   return true;
 }
 
+// lab ファイルの発話長（秒）= 全音素の最大 endTime。字幕を空白へ戻す位置に使う。
+function labFileDuration(labFileObj) {
+  var content = "";
+  try {
+    labFileObj.open("r");
+    content = labFileObj.read();
+    labFileObj.close();
+  } catch (e) {
+    return 0;
+  }
+  var entries = parseLabPhonemeEntries(content);
+  var maxEnd = 0;
+  for (var i = 0; i < entries.length; i++) {
+    for (var j = 0; j < entries[i].times.length; j++) {
+      if (entries[i].times[j].end > maxEnd) maxEnd = entries[i].times[j].end;
+    }
+  }
+  return maxEnd;
+}
+
 // 1グループ（同名の wav/txt/lab）をコンプに配置する（方式A）。
 // opts: { wav, lab, offsetSec, autoClose, phonemeFilter, subtitleLayer }
 //   wav/lab は常時配置。txt は subtitleLayer（選択中の装飾テキスト）があるときだけ
@@ -261,12 +281,16 @@ function placeLabFileOnLayer(
 function importGroupFiles(comp, attachTime, group, opts) {
   var rep = { wav: 0, txt: 0, lab: 0 };
   var audioLayer = null;
+  var speechDur = 0; // 字幕を空白へ戻す「発話の長さ」（音声 or lab）
   if (opts.wav && group.wav && group.wav.exists) {
     try {
       var item = app.project.importFile(new ImportOptions(group.wav));
       audioLayer = comp.layers.add(item);
       audioLayer.startTime = attachTime;
       rep.wav++;
+      try {
+        if (item.duration > 0) speechDur = item.duration;
+      } catch (eD) {}
     } catch (e) {}
   }
   if (opts.lab && group.lab && group.lab.exists) {
@@ -288,12 +312,17 @@ function importGroupFiles(comp, attachTime, group, opts) {
     ) {
       rep.lab++;
     }
+    if (speechDur <= 0) speechDur = labFileDuration(group.lab); // 音声が無ければ lab 長
   }
   if (opts.subtitleLayer && group.txt && group.txt.exists) {
     try {
       var t = readTextFileBestEffort(group.txt);
       if (t.length > 0) {
         applySubtitleMarker(opts.subtitleLayer, attachTime, t);
+        // 発話の長さの終わりで字幕を空白に戻す
+        if (speechDur > 0) {
+          applySubtitleMarker(opts.subtitleLayer, attachTime + speechDur, "");
+        }
         rep.txt++;
       }
     } catch (e3) {}
@@ -563,14 +592,17 @@ function buildSubtitleExpression() {
   return [
     "// " + SUBTITLE_SIGNATURE,
     "var m = thisLayer.marker;",
-    'var s = "";',
+    "var s = null;",
     "if (m.numKeys > 0) {",
     "  var i = m.nearestKey(time).index;",
     "  if (m.key(i).time > time) i--;",
     "  if (i >= 1) s = m.key(i).comment;",
     "}",
-    "// 文字列を返す（レイヤーの文字スタイルは保持される）。改行トークン \\n → 実改行(CR)",
-    's.split("\\\\n").join("\\r");',
+    "// 該当字幕が無ければ元の文字（静的ソーステキスト）にフォールバック。改行 \\n → CR",
+    "var out;",
+    "if (s === null) out = value.text;",
+    'else out = s.split("\\\\n").join("\\r");',
+    "out;",
   ].join("\n");
 }
 
@@ -592,16 +624,7 @@ function ensureSubtitleExpression(layer) {
     expr = prop.expression || "";
   } catch (e) {}
   if (expr.indexOf(SUBTITLE_SIGNATURE) >= 0) return;
-  var mk = layer.property("Marker");
-  if (mk.numKeys === 0) {
-    var cur = "";
-    try {
-      cur = prop.value.text;
-    } catch (e2) {}
-    if (cur && cur.length > 0) {
-      mk.setValueAtTime(layer.inPoint, new MarkerValue(escapeSubtitleText(cur)));
-    }
-  }
+  // 種マーカーは不要（最初の字幕より前は式が value.text=元の文字へフォールバックする）。
   prop.expression = buildSubtitleExpression();
 }
 
