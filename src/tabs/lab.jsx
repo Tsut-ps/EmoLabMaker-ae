@@ -43,29 +43,16 @@ bulkPanel.alignment = ["fill", "top"];
 bulkPanel.spacing = 4;
 bulkPanel.margins = 8;
 
-var bulkOptRow = bulkPanel.add("group");
-bulkOptRow.orientation = "row";
-bulkOptRow.alignChildren = ["left", "center"];
-bulkOptRow.spacing = 8;
-bulkOptRow.add("statictext", undefined, "配置:");
-var cbImportWav = bulkOptRow.add("checkbox", undefined, "音声(wav)");
-cbImportWav.value = cfgImportWav;
-var cbImportLab = bulkOptRow.add("checkbox", undefined, "口パク(lab)");
-cbImportLab.value = cfgImportLab;
-var cbImportTxt = bulkOptRow.add("checkbox", undefined, "テキスト(txt)");
-cbImportTxt.value = cfgImportTxt;
-cbImportLab.onClick = function () {
-  cfgImportLab = cbImportLab.value;
-  setSettingBool("importLab", cfgImportLab);
-};
-cbImportTxt.onClick = function () {
-  cfgImportTxt = cbImportTxt.value;
-  setSettingBool("importTxt", cfgImportTxt);
-};
-cbImportWav.onClick = function () {
-  cfgImportWav = cbImportWav.value;
-  setSettingBool("importWav", cfgImportWav);
-};
+// 音声(wav)+口パク(lab)は常時配置。txt は「装飾テキストを選択しているとき」だけ
+// その Source Text に字幕（マーカー＝本文）として付与する。
+var bulkHint = bulkPanel.add(
+  "statictext",
+  undefined,
+  "音声+口パクは常時配置。txtは選択テキストに字幕付与",
+);
+bulkHint.alignment = ["fill", "top"];
+bulkHint.helpTip =
+  "wav は音声レイヤー、lab は口パクマーカーとして常に配置。txt は装飾済みテキストを1つ選択しているときだけ、その Source Text に字幕（マーカー＝本文）として付与します（未選択なら txt はスキップ）。";
 
 // 配置する音素は「音素マーカー (lab)」パネルの『音素:』欄（単体配置と共通）。
 // 一括もそこで指定した cfgImportPhonemes（空＝すべて）で絞り込む。
@@ -87,8 +74,18 @@ bulkSiblingBtn.helpTip =
 bulkPanel.add(
   "statictext",
   undefined,
-  "txt(UTF-8)はそのまま字幕レイヤーに",
+  "txtはUTF-8。字幕は時間ごとに切替（後から分割・編集可）",
 );
+
+// 選択中の最初のテキストレイヤー（字幕の付与先）。無ければ null（alert しない）。
+function findSelectedTextLayer(comp) {
+  if (!comp) return null;
+  var sel = comp.selectedLayers;
+  for (var i = 0; i < sel.length; i++) {
+    if (sel[i] instanceof TextLayer) return sel[i];
+  }
+  return null;
+}
 
 // A方式: wav/txt/lab を複数選択して一括配置
 bulkPickBtn.onClick = function () {
@@ -109,16 +106,21 @@ bulkPickBtn.onClick = function () {
     alert("wav / txt / lab が選択されていません");
     return;
   }
+  var subtitleLayer = findSelectedTextLayer(comp); // 字幕の付与先（無ければ txt はスキップ）
   var t = readLabTimings();
   var opts = {
-    lab: cfgImportLab,
-    txt: cfgImportTxt,
-    wav: cfgImportWav,
+    wav: true,
+    lab: true,
     offsetSec: t.offsetSec,
     autoClose: cfgLabAutoClose,
     phonemeFilter: normalizeCsvTokens(cfgImportPhonemes),
+    subtitleLayer: subtitleLayer,
   };
   var total = { wav: 0, txt: 0, lab: 0 };
+  var hasTxt = false;
+  for (var gi = 0; gi < groups.length; gi++) {
+    if (groups[gi].txt) hasTxt = true;
+  }
   beginUndo("lab2layer: ファイル一括読み込み");
   try {
     for (var i = 0; i < groups.length; i++) {
@@ -130,19 +132,22 @@ bulkPickBtn.onClick = function () {
   } finally {
     endUndo();
   }
-  alert(
+  var msg =
     "配置完了（" +
-      groups.length +
-      " 組）\n音声: " +
-      total.wav +
-      " / テキスト: " +
-      total.txt +
-      " / 口パク: " +
-      total.lab +
-      (groups.length > 1
-        ? "\n※複数組は再生ヘッド位置に重なります。必要に応じて並べ替えてください"
-        : ""),
-  );
+    groups.length +
+    " 組）\n音声: " +
+    total.wav +
+    " / 字幕: " +
+    total.txt +
+    " / 口パク: " +
+    total.lab;
+  if (hasTxt && !subtitleLayer) {
+    msg += "\n※txtは配置先テキスト未選択のためスキップ（装飾テキストを選択して再実行）";
+  }
+  if (groups.length > 1) {
+    msg += "\n※複数組は再生ヘッド位置に重なります。必要に応じて並べ替えてください";
+  }
+  alert(msg);
 };
 
 // B方式: 選択した音声レイヤー（複数可）それぞれの隣にある同名 .lab/.txt を取り込む
@@ -169,6 +174,7 @@ bulkSiblingBtn.onClick = function () {
     alert("ソースファイルのある音声/映像レイヤーを選択してください（複数可）");
     return;
   }
+  var subtitleLayer = findSelectedTextLayer(comp); // 字幕の付与先（無ければ txt はスキップ）
   var t = readLabTimings();
   var labCount = 0;
   var txtCount = 0;
@@ -184,7 +190,7 @@ bulkSiblingBtn.onClick = function () {
       var txtF = new File(parent.fsName + "/" + base + ".txt");
       var attach = layer.inPoint;
       var any = false;
-      if (cfgImportLab && labF.exists) {
+      if (labF.exists) {
         if (
           placeLabFileOnLayer(
             layer,
@@ -200,11 +206,10 @@ bulkSiblingBtn.onClick = function () {
           any = true;
         }
       }
-      if (cfgImportTxt && txtF.exists) {
+      if (subtitleLayer && txtF.exists) {
         var txt = readTextFileBestEffort(txtF);
         if (txt.length > 0) {
-          var tl = comp.layers.addText(txt);
-          tl.startTime = attach;
+          applySubtitleMarker(subtitleLayer, attach, txt);
           txtCount++;
           any = true;
         }
@@ -214,15 +219,20 @@ bulkSiblingBtn.onClick = function () {
   } finally {
     endUndo();
   }
-  alert(
+  var bmsg =
     "隣接ファイル取込（対象 " +
-      targets.length +
-      " レイヤー）\n口パク(lab): " +
-      labCount +
-      " / テキスト(txt): " +
-      txtCount +
-      (noneCount > 0 ? "\n隣に該当ファイルが無かった: " + noneCount : ""),
-  );
+    targets.length +
+    " レイヤー）\n口パク(lab): " +
+    labCount +
+    " / 字幕: " +
+    txtCount;
+  if (!subtitleLayer) {
+    bmsg += "\n※字幕は配置先テキスト未選択のためスキップ（音声＋装飾テキストを選択）";
+  }
+  if (noneCount > 0) {
+    bmsg += "\n隣に該当ファイルが無かった: " + noneCount;
+  }
+  alert(bmsg);
 };
 
 // ========== 配置する音素（単体配置・一括配置で共通） ==========
@@ -537,165 +547,6 @@ autoCloseCheck.helpTip =
 autoCloseCheck.onClick = function () {
   cfgLabAutoClose = autoCloseCheck.value;
   setSettingBool("labAutoClose", cfgLabAutoClose);
-};
-
-// ========== 字幕（選択テキストを時間で差し替え） ==========
-// 装飾済みテキストを選び、Source Text に式を付与。レイヤー自身のマーカー
-// （コメント＝本文）で時間ごとに中身を切替える（スタイル保持・改行は \n）。
-var subtitlePanel = tabLab.add("panel", undefined, "字幕 (選択テキスト)");
-subtitlePanel.orientation = "column";
-subtitlePanel.alignChildren = ["fill", "top"];
-subtitlePanel.alignment = ["fill", "top"];
-subtitlePanel.spacing = 4;
-subtitlePanel.margins = 8;
-
-var subtitleHint = subtitlePanel.add(
-  "statictext",
-  undefined,
-  "装飾テキストを選び、再生位置ごとに本文を追加（改行は \\n）",
-);
-subtitleHint.alignment = ["fill", "top"];
-subtitleHint.helpTip =
-  "選択した装飾済みテキストレイヤーの Source Text に式を付け、マーカー（コメント＝本文）で時間ごとに中身を差し替えます。フォント/色などのスタイルは保持。改行は \\n。前半/後半で分けるときは区切り位置でもう一度追加します。";
-
-var subtitleInputRow = subtitlePanel.add("group");
-subtitleInputRow.orientation = "row";
-subtitleInputRow.alignment = ["fill", "top"];
-subtitleInputRow.alignChildren = ["fill", "center"];
-subtitleInputRow.spacing = 4;
-var subtitleInput = subtitleInputRow.add("edittext", undefined, "");
-subtitleInput.alignment = ["fill", "center"];
-subtitleInput.preferredSize.height = BUTTON_HEIGHT;
-subtitleInput.helpTip = "字幕本文（改行は \\n）。空のまま追加すると空字幕＝消す用";
-var subtitleAddBtn = subtitleInputRow.add("button", undefined, "現在位置に追加");
-subtitleAddBtn.preferredSize = [100, BUTTON_HEIGHT];
-subtitleAddBtn.alignment = ["right", "center"];
-
-var subtitleBtnRow = subtitlePanel.add("group");
-subtitleBtnRow.orientation = "row";
-subtitleBtnRow.alignment = ["fill", "top"];
-subtitleBtnRow.alignChildren = ["fill", "center"];
-subtitleBtnRow.spacing = 5;
-var subtitleDelBtn = subtitleBtnRow.add("button", undefined, "ここの字幕を削除");
-subtitleDelBtn.alignment = ["fill", "center"];
-subtitleDelBtn.preferredSize.height = BUTTON_HEIGHT;
-subtitleDelBtn.helpTip = "再生位置にある字幕マーカーを削除";
-var subtitleBakeBtn = subtitleBtnRow.add("button", undefined, "解除（確定）");
-subtitleBakeBtn.alignment = ["fill", "center"];
-subtitleBakeBtn.preferredSize.height = BUTTON_HEIGHT;
-subtitleBakeBtn.helpTip =
-  "字幕式を外し、現在表示中の本文を静的テキストとして焼き込む";
-
-// 選択中の最初のテキストレイヤーを返す（無ければ alert して null）
-function getSelectedTextLayer() {
-  var comp = getActiveComp();
-  if (!comp) {
-    alert("コンポジションを開いてください");
-    return null;
-  }
-  var sel = comp.selectedLayers;
-  for (var i = 0; i < sel.length; i++) {
-    if (sel[i] instanceof TextLayer) return sel[i];
-  }
-  alert("装飾済みのテキストレイヤーを1つ選択してください");
-  return null;
-}
-
-// 字幕式が無ければ付与（初回は既存の静的本文を inPoint に種マーカーとして残す）
-function ensureSubtitleExpression(layer) {
-  var prop = layer.property("Source Text");
-  var expr = "";
-  try {
-    expr = prop.expression || "";
-  } catch (e) {}
-  if (expr.indexOf(SUBTITLE_SIGNATURE) >= 0) return;
-  var mk = layer.property("Marker");
-  if (mk.numKeys === 0) {
-    var cur = "";
-    try {
-      cur = prop.value.text;
-    } catch (e2) {}
-    if (cur && cur.length > 0) {
-      mk.setValueAtTime(
-        layer.inPoint,
-        new MarkerValue(escapeSubtitleText(cur)),
-      );
-    }
-  }
-  prop.expression = buildSubtitleExpression();
-}
-
-subtitleAddBtn.onClick = function () {
-  var layer = getSelectedTextLayer();
-  if (!layer) return;
-  var comp = layer.containingComp;
-  beginUndo("emoSubtitle: 字幕を追加");
-  try {
-    ensureSubtitleExpression(layer);
-    layer
-      .property("Marker")
-      .setValueAtTime(
-        comp.time,
-        new MarkerValue(escapeSubtitleText(subtitleInput.text)),
-      );
-  } finally {
-    endUndo();
-  }
-  subtitleInput.text = "";
-};
-
-subtitleDelBtn.onClick = function () {
-  var layer = getSelectedTextLayer();
-  if (!layer) return;
-  var comp = layer.containingComp;
-  var mk = layer.property("Marker");
-  if (mk.numKeys === 0) {
-    alert("字幕マーカーがありません");
-    return;
-  }
-  var idx = mk.nearestKey(comp.time).index;
-  if (Math.abs(mk.keyTime(idx) - comp.time) > 0.05) {
-    alert("再生位置に字幕マーカーがありません（近くに移動してください）");
-    return;
-  }
-  beginUndo("emoSubtitle: 字幕を削除");
-  try {
-    mk.removeKey(idx);
-  } finally {
-    endUndo();
-  }
-};
-
-subtitleBakeBtn.onClick = function () {
-  var layer = getSelectedTextLayer();
-  if (!layer) return;
-  var comp = layer.containingComp;
-  var prop = layer.property("Source Text");
-  var expr = "";
-  try {
-    expr = prop.expression || "";
-  } catch (e) {}
-  if (expr.indexOf(SUBTITLE_SIGNATURE) < 0) {
-    alert("このテキストは字幕式ではありません");
-    return;
-  }
-  // 現在表示中の本文を解決して静的に焼き込む
-  var resolved = "";
-  var mk = layer.property("Marker");
-  if (mk.numKeys > 0) {
-    var i = mk.nearestKey(comp.time).index;
-    if (mk.keyTime(i) > comp.time) i--;
-    if (i >= 1) resolved = unescapeSubtitleText(mk.keyValue(i).comment);
-  }
-  beginUndo("emoSubtitle: 字幕を確定");
-  try {
-    prop.expression = "";
-    var td = prop.value;
-    td.text = resolved;
-    prop.setValue(td);
-  } finally {
-    endUndo();
-  }
 };
 
 // ========== 口形状の割り当て (PSDToolKit互換) ==========

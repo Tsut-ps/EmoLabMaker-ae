@@ -255,7 +255,9 @@ function placeLabFileOnLayer(
 }
 
 // 1グループ（同名の wav/txt/lab）をコンプに配置する（方式A）。
-// opts: { lab, txt, wav, offsetSec, autoClose }
+// opts: { wav, lab, offsetSec, autoClose, phonemeFilter, subtitleLayer }
+//   wav/lab は常時配置。txt は subtitleLayer（選択中の装飾テキスト）があるときだけ
+//   その Source Text に字幕（マーカー＝本文）として付与する。
 function importGroupFiles(comp, attachTime, group, opts) {
   var rep = { wav: 0, txt: 0, lab: 0 };
   var audioLayer = null;
@@ -287,12 +289,11 @@ function importGroupFiles(comp, attachTime, group, opts) {
       rep.lab++;
     }
   }
-  if (opts.txt && group.txt && group.txt.exists) {
+  if (opts.subtitleLayer && group.txt && group.txt.exists) {
     try {
       var t = readTextFileBestEffort(group.txt);
       if (t.length > 0) {
-        var tl = comp.layers.addText(t);
-        tl.startTime = attachTime;
+        applySubtitleMarker(opts.subtitleLayer, attachTime, t);
         rep.txt++;
       }
     } catch (e3) {}
@@ -551,16 +552,9 @@ function mouthMatchKeys(label) {
 // （コメント＝本文）を時間ごとに読んで中身を差し替える。スタイルは保持。
 // 改行はマーカーコメントに持たせにくいので "\n" トークンで保持し、式/取り出しで実改行へ。
 
-// 実改行 → "\n" トークン（マーカーコメント保存用）
+// 実改行 → "\n" トークン（マーカーコメント保存用）。式側で実改行(CR)へ戻す。
 function escapeSubtitleText(s) {
   return String(s == null ? "" : s).replace(/\r\n|\r|\n/g, "\\n");
-}
-
-// "\n" トークン → 実改行(CR)。AE テキストの改行は \r。
-function unescapeSubtitleText(s) {
-  return String(s == null ? "" : s)
-    .split("\\n")
-    .join("\r");
 }
 
 // Source Text 用エクスプレッション。value(=元の装飾済み TextDocument)の text だけ
@@ -580,4 +574,34 @@ function buildSubtitleExpression() {
     "td.text = s;",
     "td;",
   ].join("\n");
+}
+
+// テキストレイヤーに字幕式が無ければ付与する。初回は既存の静的本文を inPoint に
+// 種マーカーとして残し、式適用直後に空白化するのを防ぐ。
+function ensureSubtitleExpression(layer) {
+  var prop = layer.property("Source Text");
+  var expr = "";
+  try {
+    expr = prop.expression || "";
+  } catch (e) {}
+  if (expr.indexOf(SUBTITLE_SIGNATURE) >= 0) return;
+  var mk = layer.property("Marker");
+  if (mk.numKeys === 0) {
+    var cur = "";
+    try {
+      cur = prop.value.text;
+    } catch (e2) {}
+    if (cur && cur.length > 0) {
+      mk.setValueAtTime(layer.inPoint, new MarkerValue(escapeSubtitleText(cur)));
+    }
+  }
+  prop.expression = buildSubtitleExpression();
+}
+
+// テキストレイヤーの time 位置に字幕マーカー（コメント＝本文）を打ち、字幕式を保証する。
+function applySubtitleMarker(layer, time, text) {
+  ensureSubtitleExpression(layer);
+  layer
+    .property("Marker")
+    .setValueAtTime(time, new MarkerValue(escapeSubtitleText(text)));
 }
