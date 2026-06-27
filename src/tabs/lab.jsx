@@ -52,7 +52,7 @@ var bulkHint = bulkPanel.add(
 );
 bulkHint.alignment = ["fill", "top"];
 bulkHint.helpTip =
-  "wav は音声レイヤー、lab は口パクマーカーとして常に配置。txt は装飾済みテキストを1つ選択しているときだけ、その Source Text に字幕（ホールドキーフレーム＝本文）として付与します。発話の終わりで空白に戻ります（未選択なら txt はスキップ）。エクスプレッションではなくキーフレームなのでプレビューが軽い。";
+  "wav は音声レイヤー、lab は口パクマーカーとして常に配置。txt は装飾済みテキストを1つ選択しているときだけ、その Source Text 式＋マーカー（コメント＝本文）として付与します。スタイルは選択テキスト1枚に集約され、再デザインで全字幕に反映されます（デザイン一元化）。発話（lab）の終わりで空白に戻ります。未選択なら txt はスキップ。※プレビューは重め（後段でベイク機能を予定）。";
 
 // 配置する音素は「音素マーカー (lab)」パネルの『音素:』欄（単体配置と共通）。
 // 一括もそこで指定した cfgImportPhonemes（空＝すべて）で絞り込む。
@@ -209,10 +209,15 @@ bulkSiblingBtn.onClick = function () {
       if (subtitleLayer && txtF.exists) {
         var txt = readTextFileBestEffort(txtF);
         if (txt.length > 0) {
-          applySubtitleKeyframe(subtitleLayer, attach, txt);
-          // 音声の長さの終わり（outPoint）で字幕を空白に戻す
-          if (layer.outPoint > attach) {
-            applySubtitleKeyframe(subtitleLayer, layer.outPoint, "");
+          applySubtitleMarker(subtitleLayer, attach, txt);
+          // 発話の終わりで字幕を空白に戻す（lab 長を優先、無ければ音声 outPoint）
+          var subEnd = layer.outPoint;
+          if (labF.exists) {
+            var ld = labFileDuration(labF);
+            if (ld > 0) subEnd = attach + ld;
+          }
+          if (subEnd > attach) {
+            applySubtitleMarker(subtitleLayer, subEnd, "");
           }
           txtCount++;
           any = true;

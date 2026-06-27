@@ -5,6 +5,7 @@
 var BUTTON_HEIGHT = 22;
 var LAB_MAP_SIGNATURE = "lab2layerPhonemeMap";
 var BLINK_SIGNATURE = "emoBlinkAuto";
+var SUBTITLE_SIGNATURE = "emoSubtitle2layer";
 
 // ════════════════════════════════════════════════════════════════
 // 設定（app.settings で AE 環境に永続化。プロジェクト非依存）

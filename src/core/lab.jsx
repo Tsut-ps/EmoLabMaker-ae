@@ -281,7 +281,7 @@ function labFileDuration(labFileObj) {
 function importGroupFiles(comp, attachTime, group, opts) {
   var rep = { wav: 0, txt: 0, lab: 0 };
   var audioLayer = null;
-  var speechDur = 0; // 字幕を空白へ戻す「発話の長さ」（音声 or lab）
+  var speechDur = 0; // 字幕を空白へ戻す「発話の長さ」（lab 優先・無ければ音声長）
   if (opts.wav && group.wav && group.wav.exists) {
     try {
       var item = app.project.importFile(new ImportOptions(group.wav));
@@ -289,7 +289,7 @@ function importGroupFiles(comp, attachTime, group, opts) {
       audioLayer.startTime = attachTime;
       rep.wav++;
       try {
-        if (item.duration > 0) speechDur = item.duration;
+        if (item.duration > 0) speechDur = item.duration; // フォールバック
       } catch (eD) {}
     } catch (e) {}
   }
@@ -312,16 +312,17 @@ function importGroupFiles(comp, attachTime, group, opts) {
     ) {
       rep.lab++;
     }
-    if (speechDur <= 0) speechDur = labFileDuration(group.lab); // 音声が無ければ lab 長
+    var labDur = labFileDuration(group.lab);
+    if (labDur > 0) speechDur = labDur; // 字幕長は lab の終わりを優先
   }
   if (opts.subtitleLayer && group.txt && group.txt.exists) {
     try {
       var t = readTextFileBestEffort(group.txt);
       if (t.length > 0) {
-        applySubtitleKeyframe(opts.subtitleLayer, attachTime, t);
+        applySubtitleMarker(opts.subtitleLayer, attachTime, t);
         // 発話の長さの終わりで字幕を空白に戻す
         if (speechDur > 0) {
-          applySubtitleKeyframe(opts.subtitleLayer, attachTime + speechDur, "");
+          applySubtitleMarker(opts.subtitleLayer, attachTime + speechDur, "");
         }
         rep.txt++;
       }
@@ -575,11 +576,18 @@ function mouthMatchKeys(label) {
 }
 
 // ════════════════════════════════════════════════════════════════
-// 字幕（装飾テキストの Source Text をホールド・キーフレームで差し替える）
+// 字幕（装飾テキストの Source Text を式＋マーカーで時間ごとに差し替える）
 // ════════════════════════════════════════════════════════════════
-// 装飾済みテキストレイヤーの Source Text に、発話の開始/終了でホールド・キーフレームを
-// 打って本文を切り替える。エクスプレッション方式（毎フレーム評価＝テキスト再描画で重い）
-// と違い、値が変わる瞬間だけ再描画されるためプレビューが軽い。スタイルは保持。
+// 装飾済みテキストレイヤー1枚にスタイル（デザイン）を集約し、Source Text 式が
+// レイヤー自身のマーカー（コメント＝本文）を時間ごとに読んで本文だけ差し替える。
+// スタイルは1か所（このレイヤー）なので、再デザインすれば全字幕に反映される
+// （＝デザイン一元化）。プレビューは重め（毎フレーム評価）→ 後段でベイク機能を追加予定。
+// 改行はマーカーコメントに持たせにくいので "\n" トークンで保持し、式側で実改行へ。
+
+// 実改行 → "\n" トークン（マーカーコメント保存用）。式側で実改行(CR)へ戻す。
+function escapeSubtitleText(s) {
+  return String(s == null ? "" : s).replace(/\r\n|\r|\n/g, "\\n");
+}
 
 // Source Text プロパティを matchName で取得する。"Source Text" は「テキスト」グループの
 // 配下にあり、名前もローカライズされる（日本語版＝ソーステキスト）ため、レイヤー直下の
@@ -590,36 +598,40 @@ function getSourceTextProp(layer) {
     .property("ADBE Text Document");
 }
 
-// Source Text に time 位置のホールド・キーフレームを打つ（本文だけ差し替え、スタイル保持）。
-function setSubtitleKey(prop, time, text) {
-  var td = prop.value; // 現在の TextDocument（レイヤーのスタイルを保持）
-  td.text = String(text == null ? "" : text).replace(/\r\n|\n/g, "\r");
-  prop.setValueAtTime(time, td);
-  // 補間は保持（テキストは補間しないが、明示して切替を確実にする）。
-  try {
-    var idx = prop.nearestKeyIndex(time);
-    prop.setInterpolationTypeAtKey(
-      idx,
-      KeyframeInterpolationType.HOLD,
-      KeyframeInterpolationType.HOLD,
-    );
-  } catch (eK) {}
+// Source Text 用エクスプレッション。文字列を返す（レイヤーの文字スタイルは保持される）。
+// マーカーから読めないとき（最初の字幕より前・マーカー無し）は元の文字へフォールバック。
+function buildSubtitleExpression() {
+  return [
+    "// " + SUBTITLE_SIGNATURE,
+    "var m = thisLayer.marker;",
+    "var s = null;",
+    "if (m.numKeys > 0) {",
+    "  var i = m.nearestKey(time).index;",
+    "  if (m.key(i).time > time) i--;",
+    "  if (i >= 1) s = m.key(i).comment;",
+    "}",
+    "var out;",
+    "if (s === null) out = value.text;",
+    'else out = s.split("\\\\n").join("\\r");',
+    "out;",
+  ].join("\n");
 }
 
-// テキストレイヤーの time 位置に字幕を打つ。初回（キーフレーム無し）は inPoint に
-// 元の文字を種キーフレームとして残し、最初の字幕より前は元の文字を表示する。
-// 既存の字幕式が付いていればキーフレーム方式へ移行するため外す。
-function applySubtitleKeyframe(layer, time, text) {
+// テキストレイヤーに字幕式が無ければ付与する（マーカーから本文を引く）。
+function ensureSubtitleExpression(layer) {
   var prop = getSourceTextProp(layer);
+  var expr = "";
   try {
-    if (prop.expression) prop.expression = "";
+    expr = prop.expression || "";
   } catch (e) {}
-  if (prop.numKeys === 0) {
-    var orig = "";
-    try {
-      orig = prop.value.text;
-    } catch (e2) {}
-    setSubtitleKey(prop, layer.inPoint, orig);
-  }
-  setSubtitleKey(prop, time, text);
+  if (expr.indexOf(SUBTITLE_SIGNATURE) >= 0) return;
+  prop.expression = buildSubtitleExpression();
+}
+
+// テキストレイヤーの time 位置に字幕マーカー（コメント＝本文）を打ち、字幕式を保証する。
+function applySubtitleMarker(layer, time, text) {
+  ensureSubtitleExpression(layer);
+  layer
+    .property("Marker")
+    .setValueAtTime(time, new MarkerValue(escapeSubtitleText(text)));
 }
