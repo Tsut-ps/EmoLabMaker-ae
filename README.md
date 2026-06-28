@@ -1,4 +1,4 @@
-# EmoLabMaker-ae
+# EmoLabMaker
 
 <img width="1280" height="720" alt="EmoLabMaker v2" src="https://github.com/user-attachments/assets/3809a8ec-e456-4d54-b367-461eec51fe36" />
 
