@@ -1,6 +1,11 @@
 # EmoLabMaker
 
-<img width="1280" height="720" alt="EmoLabMaker v2" src="https://github.com/user-attachments/assets/3809a8ec-e456-4d54-b367-461eec51fe36" />
+<img width="1280" height="720" alt="TV - 1" src="https://github.com/user-attachments/assets/7835d4a9-a872-4983-a8dc-c6820a1ea297" />
+
+立ち絵の表情と口パクをかんたんに切り替えられる Ae 用スクリプト
+
+
+## これ is 何？
 
 EmoLabMaker は、
 
@@ -9,9 +14,6 @@ EmoLabMaker は、
 - PSD 形式（PSDToolKit 互換対応）や任意のレイヤー構造を立ち絵として自動セットアップ
 
 をかんたんに行うことができる、After Effects のスクリプトです
-
-
-## これ is 何？
 
 https://github.com/user-attachments/assets/7843ca7f-e059-45b1-8d44-26be9f45a0a5
 
