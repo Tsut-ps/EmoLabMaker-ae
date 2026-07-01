@@ -39,10 +39,53 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Build release notes (from CHANGELOG.md)
+        id: notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # v を外したものをタイトルに使う（例: v2.13.2 -> 2.13.2）
+          VERSION="${TAG#v}"
+
+          # CHANGELOG.md から「### <TAG>」～次の「### 」直前までを本文として抽出
+          SECTION="$(awk -v tag="### ${TAG}" '
+            $0==tag {grab=1; next}
+            grab && /^### / {exit}
+            grab {print}
+          ' CHANGELOG.md)"
+          # 前後の空行を除去
+          SECTION="$(printf "%s" "$SECTION" | sed -e '/./,$!d' | sed -e ':a' -e '/^\n*$/{$d;N;ba}')"
+          if [ -z "$SECTION" ]; then
+            SECTION="- （変更履歴は CHANGELOG.md を参照）"
+          fi
+
+          # 直前のバージョン見出し（### vX.Y.Z）を Full Changelog の起点にする
+          PREV_TAG="$(awk '/^### v/{print $2}' CHANGELOG.md | grep -v -x "$TAG" | head -n 1)"
+
+          ASSET_URL="https://github.com/${REPO}/releases/download/${TAG}/EmoLabMaker.jsx"
+
+          {
+            echo "## ダウンロード"
+            echo ""
+            echo "[EmoLabMaker.jsx](${ASSET_URL})"
+            echo ""
+            echo "## 変更履歴"
+            echo ""
+            echo "${SECTION}"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "Full Changelog: https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
+            fi
+          } > RELEASE_NOTES.md
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
-          generate_release_notes: true
+          name: EmoLabMaker ${{ steps.notes.outputs.version }}
+          body_path: RELEASE_NOTES.md
+          prerelease: true
           files: dist/EmoLabMaker.jsx
