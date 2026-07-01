@@ -40,14 +40,10 @@ jobs:
           fi
 
       - name: Build release notes (from CHANGELOG.md)
-        id: notes
         env:
           TAG: ${{ steps.tag.outputs.tag }}
           REPO: ${{ github.repository }}
         run: |
-          # v を外したものをタイトルに使う（例: v2.13.2 -> 2.13.2）
-          VERSION="${TAG#v}"
-
           # CHANGELOG.md から「### <TAG>」～次の「### 」直前までを本文として抽出
           SECTION="$(awk -v tag="### ${TAG}" '
             $0==tag {grab=1; next}
@@ -79,13 +75,11 @@ jobs:
             fi
           } > RELEASE_NOTES.md
 
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-
       - name: Create / update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: EmoLabMaker ${{ steps.notes.outputs.version }}
+          name: EmoLabMaker ${{ steps.tag.outputs.tag }}
           body_path: RELEASE_NOTES.md
           prerelease: true
           files: dist/EmoLabMaker.jsx
