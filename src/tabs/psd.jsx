@@ -334,14 +334,10 @@ var blinkApplyBtn = blinkBtnRow.add("button", undefined, "目パチ設定");
 blinkApplyBtn.preferredSize.height = BUTTON_HEIGHT;
 blinkApplyBtn.helpTip =
   "割当レイヤーに自動まばたきを設定（表情登録済みなら開き目表情中のみまばたき）";
-var blinkRemoveBtn = blinkBtnRow.add("button", undefined, "解除(コンポ)");
-blinkRemoveBtn.preferredSize.height = BUTTON_HEIGHT;
-blinkRemoveBtn.helpTip =
-  "アクティブコンポ内の目パチを一括解除（開き/中間/閉じをまとめて。表情登録済みなら表情切替に戻す）";
-var blinkRemoveListBtn = blinkBtnRow.add("button", undefined, "解除(一覧)");
+var blinkRemoveListBtn = blinkBtnRow.add("button", undefined, "解除");
 blinkRemoveListBtn.preferredSize.height = BUTTON_HEIGHT;
 blinkRemoveListBtn.helpTip =
-  "プロジェクト内の目パチ設定済みコンポを一覧から選んで一括解除（レイヤー選択不要）";
+  "目パチ設定済みコンポを一覧から選んで一括解除（レイヤー選択不要。表情登録済みなら表情切替に戻す）";
 
 blinkApplyBtn.onClick = function () {
   var openRow = blinkRows[0];
@@ -428,40 +424,6 @@ blinkApplyBtn.onClick = function () {
       "\nスキップ: " +
       skippedCount +
       " レイヤー（口パク設定済み、または削除済み）";
-  }
-  alert(message);
-};
-
-blinkRemoveBtn.onClick = function () {
-  var comp = getActiveComp();
-  if (!comp) {
-    alert(
-      "目パチを解除するコンポをアクティブにしてください（または「解除(一覧)」を使用）",
-    );
-    return;
-  }
-  // コンポグループ単位で解除: 選択レイヤーだけでなく、アクティブコンポ内の
-  // 目パチレイヤーをすべて解除する（開きだけ解除されて中間/閉じが残る不整合を防ぐ）(#E)
-  if (!hasBlinkLayer(comp)) {
-    alert("このコンポには目パチ設定済みのレイヤーがありません。");
-    return;
-  }
-  var res;
-  beginUndo("EmoLabMaker: 目パチ解除（コンポ）");
-  try {
-    res = removeBlinkFromComp(comp);
-  } finally {
-    endUndo();
-  }
-
-  var message =
-    "「" +
-    comp.name +
-    "」の目パチを解除しました（" +
-    res.removed +
-    " レイヤー）。";
-  if (res.restored > 0) {
-    message += "\nうち " + res.restored + " レイヤーは表情切替に戻しました。";
   }
   alert(message);
 };

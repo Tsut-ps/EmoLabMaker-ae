@@ -825,7 +825,7 @@ var mouthRemoveBtn = mouthMapBtnRow.add("button", undefined, "解除");
 mouthRemoveBtn.alignment = ["fill", "center"];
 mouthRemoveBtn.preferredSize.height = BUTTON_HEIGHT;
 mouthRemoveBtn.helpTip =
-  "選択レイヤーのマッピングを解除（表情登録済みなら表情切替に戻す）";
+  "口パク設定済みコンポを一覧（口パクタグ付き）で確認し、選んで一括解除（表情登録済みなら表情切替に戻す）";
 
 // 口形カバレッジ警告: 音素の未割当（閉じ口になる）／口形のレイヤー未割当 を示す
 var mouthCoverageWarn = mouthMapPanel.add("statictext", undefined, "", {
@@ -1131,48 +1131,91 @@ mouthApplyBtn.onClick = function () {
   alert(message);
 };
 
+// 設定済み一覧（コンポ単位・口パクタグ表示）を確認しつつ解除する(#B)
 mouthRemoveBtn.onClick = function () {
-  var comp = getActiveComp();
-  if (!comp || comp.selectedLayers.length === 0) {
-    alert("解除するレイヤーを選択してください");
+  var groups = findLabMappedComps();
+  if (groups.length === 0) {
+    alert("口パク設定済みのレイヤーが見つかりませんでした。");
     return;
   }
+  var dlg = new Window("dialog", "口パク解除（設定済み一覧）");
+  dlg.orientation = "column";
+  dlg.alignChildren = ["fill", "top"];
+  dlg.margins = 12;
+  dlg.spacing = 4;
+  dlg.add(
+    "statictext",
+    undefined,
+    "解除するコンポを選択（そのコンポ内の口パクを一括解除）:",
+  );
+
+  var listGrp = dlg.add("group");
+  listGrp.orientation = "column";
+  listGrp.alignChildren = ["fill", "top"];
+  listGrp.spacing = 1;
+  var checks = [];
+  for (var i = 0; i < groups.length; i++) {
+    var tagText =
+      groups[i].tags.length > 0 ? groups[i].tags.join(", ") : "（なし）";
+    var cb = listGrp.add(
+      "checkbox",
+      undefined,
+      groups[i].comp.name +
+        "（" +
+        groups[i].layers.length +
+        " レイヤー・タグ: " +
+        tagText +
+        "）",
+    );
+    cb.value = true;
+    var tipNames = [];
+    for (var t = 0; t < groups[i].layers.length; t++) {
+      try {
+        tipNames.push(groups[i].layers[t].name);
+      } catch (eT) {}
+    }
+    cb.helpTip = tipNames.join(", ");
+    checks.push(cb);
+  }
+
+  var selRow = dlg.add("group");
+  selRow.orientation = "row";
+  var allBtn = selRow.add("button", undefined, "全選択");
+  var noneBtn = selRow.add("button", undefined, "全解除");
+  allBtn.onClick = function () {
+    for (var k = 0; k < checks.length; k++) checks[k].value = true;
+  };
+  noneBtn.onClick = function () {
+    for (var k = 0; k < checks.length; k++) checks[k].value = false;
+  };
+
+  var btnRow = dlg.add("group");
+  btnRow.alignment = ["right", "bottom"];
+  btnRow.add("button", undefined, "解除", { name: "ok" });
+  btnRow.add("button", undefined, "キャンセル", { name: "cancel" });
+  if (dlg.show() !== 1) return;
 
   var removedCount = 0;
   var restoredCount = 0;
-
-  beginUndo("lab2layer: 口形状マッピング解除");
+  var compCount = 0;
+  beginUndo("lab2layer: 口パク解除（コンポ単位）");
   try {
-    var layers = comp.selectedLayers;
-    for (var i = 0; i < layers.length; i++) {
-      var layer = layers[i];
-      var expr = "";
-      try {
-        expr = layer.transform.opacity.expression;
-      } catch (e) {
-        continue;
-      }
-      if (!expr || expr.indexOf(LAB_MAP_SIGNATURE) < 0) continue;
-
-      var emoCtx = parseEmoContext(layer);
-      if (emoCtx) {
-        // 表情切替の登録に戻す
-        layer.transform.opacity.expression = buildOpacityExpression(
-          emoCtx.ctrlCompName,
-          emoCtx.targetCompName,
-        );
-        restoredCount++;
-      } else {
-        layer.transform.opacity.expression = "";
-        layer.transform.opacity.setValue(100);
-      }
-      removedCount++;
+    for (var j = 0; j < groups.length; j++) {
+      if (!checks[j].value) continue;
+      var res = removeLabMappingFromComp(groups[j].comp);
+      removedCount += res.removed;
+      restoredCount += res.restored;
+      compCount++;
     }
   } finally {
     endUndo();
   }
 
-  var message = removedCount + " レイヤーのマッピングを解除しました。";
+  var message =
+    compCount +
+    " コンポ・計 " +
+    removedCount +
+    " レイヤーの口パクを解除しました。";
   if (restoredCount > 0) {
     message += "\nうち " + restoredCount + " レイヤーは表情切替に戻しました。";
   }

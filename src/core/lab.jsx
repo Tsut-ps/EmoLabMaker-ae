@@ -541,17 +541,119 @@ function normalizeCsvTokens(text) {
   return tokens;
 }
 
-/** 削除済みレイヤーを除外しつつ名前一覧を返す */
+/** 削除済みレイヤーを除外しつつ「名前 (親コンポ)」の一覧を返す */
 function describeAssignedLayers(layers) {
   var names = [];
   for (var i = layers.length - 1; i >= 0; i--) {
     try {
-      names.unshift(layers[i].name);
+      var ly = layers[i];
+      var label = ly.name;
+      // どの立ち絵（親コンポ）の口かが分かるよう所属コンポを併記する
+      try {
+        var pc = ly.containingComp;
+        if (pc) label += " (" + pc.name + ")";
+      } catch (eP) {}
+      names.unshift(label);
     } catch (e) {
       layers.splice(i, 1); // 削除済みレイヤーを掃除
     }
   }
   return names.length > 0 ? names.join(", ") : "（未割当）";
+}
+
+// ── 口パク設定済みレイヤーの調査・解除（目パチと対称のヘルパー） ──
+
+// レイヤーの口パク式から埋め込まれた口パクタグを読む（無ければ ""、口パク未設定なら null）
+function readLabTag(layer) {
+  var expr = "";
+  try {
+    expr = layer.transform.opacity.expression;
+  } catch (e) {
+    return null;
+  }
+  if (!expr || expr.indexOf(LAB_MAP_SIGNATURE) < 0) return null;
+  var key = 'var labTag = "';
+  var at = expr.indexOf(key);
+  if (at < 0) return "";
+  var start = at + key.length;
+  var end = expr.indexOf('"', start);
+  if (end < 0) return "";
+  return expr.substring(start, end);
+}
+
+// プロジェクト内の口パク設定済みレイヤーを集める
+function findLabMappedLayers() {
+  var out = [];
+  var comps = getProjectComps();
+  for (var c = 0; c < comps.length; c++) {
+    var comp = comps[c];
+    for (var i = 1; i <= comp.numLayers; i++) {
+      var ly = comp.layer(i);
+      if (hasOpacitySignature(ly, LAB_MAP_SIGNATURE)) {
+        out.push({ comp: comp, layer: ly });
+      }
+    }
+  }
+  return out;
+}
+
+// 口パク設定済みレイヤーをコンポ単位でまとめる（{ comp, layers, tags }）
+function findLabMappedComps() {
+  var found = findLabMappedLayers();
+  var groups = [];
+  var index = {};
+  for (var i = 0; i < found.length; i++) {
+    var id = found[i].comp.id;
+    if (index[id] === undefined) {
+      index[id] = groups.length;
+      groups.push({ comp: found[i].comp, layers: [], tags: [] });
+    }
+    var g = groups[index[id]];
+    g.layers.push(found[i].layer);
+    var t = readLabTag(found[i].layer);
+    if (t !== null) {
+      var key = t === "" ? "（なし）" : t;
+      var dup = false;
+      for (var k = 0; k < g.tags.length; k++) {
+        if (g.tags[k] === key) {
+          dup = true;
+          break;
+        }
+      }
+      if (!dup) g.tags.push(key);
+    }
+  }
+  return groups;
+}
+
+// 1レイヤーの口パクを解除する（表情登録済みなら表情切替へ戻す）。戻り値: restored か
+function removeLabMappingFromLayer(layer) {
+  var emoCtx = parseEmoContext(layer);
+  if (emoCtx) {
+    layer.transform.opacity.expression = buildOpacityExpression(
+      emoCtx.ctrlCompName,
+      emoCtx.targetCompName,
+    );
+    return true;
+  }
+  layer.transform.opacity.expression = "";
+  layer.transform.opacity.setValue(100);
+  return false;
+}
+
+// 指定コンポ内の全口パクレイヤーを解除する
+function removeLabMappingFromComp(comp) {
+  var removed = 0;
+  var restored = 0;
+  for (var i = 1; i <= comp.numLayers; i++) {
+    var ly = comp.layer(i);
+    if (!hasOpacitySignature(ly, LAB_MAP_SIGNATURE)) continue;
+    try {
+      if (removeLabMappingFromLayer(ly)) restored++;
+      removed++;
+    } catch (e) {}
+  }
+  return { removed: removed, restored: restored };
 }
 
 /**
