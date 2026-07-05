@@ -564,6 +564,8 @@ function describeAssignedLayers(layers) {
 // ── 口パク設定済みレイヤーの調査・解除（目パチと対称のヘルパー） ──
 
 // レイヤーの口パク式から埋め込まれた口パクタグを読む（無ければ ""、口パク未設定なら null）
+// escapeExprStr（\\ / \" / \n）でエスケープされているので、対になるアンエスケープをしつつ
+// 「エスケープされていない閉じ引用符」まで走査する（タグに " や \ を含んでも正しく戻す）。
 function readLabTag(layer) {
   var expr = "";
   try {
@@ -575,10 +577,22 @@ function readLabTag(layer) {
   var key = 'var labTag = "';
   var at = expr.indexOf(key);
   if (at < 0) return "";
-  var start = at + key.length;
-  var end = expr.indexOf('"', start);
-  if (end < 0) return "";
-  return expr.substring(start, end);
+  var i = at + key.length;
+  var out = "";
+  while (i < expr.length) {
+    var ch = expr.charAt(i);
+    if (ch === "\\") {
+      var nx = i + 1 < expr.length ? expr.charAt(i + 1) : "";
+      if (nx === "n") out += "\n";
+      else out += nx; // \\ → \ , \" → " , それ以外はその文字
+      i += 2;
+      continue;
+    }
+    if (ch === '"') break; // エスケープされていない閉じ引用符で終了
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 // プロジェクト内の口パク設定済みレイヤーを集める
@@ -626,7 +640,8 @@ function findLabMappedComps() {
   return groups;
 }
 
-// 1レイヤーの口パクを解除する（表情登録済みなら表情切替へ戻す）。戻り値: restored か
+// 1レイヤーの口パクを解除する（表情登録済みなら表情切替へ戻す）。
+// 戻り値: 表情切替に戻したら true、式を消して不透明度100に戻したら false
 function removeLabMappingFromLayer(layer) {
   var emoCtx = parseEmoContext(layer);
   if (emoCtx) {
