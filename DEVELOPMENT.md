@@ -88,7 +88,7 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 ## 開発フロー
 
 1. **`src/` の該当ファイルを編集**（`dist/` は触らない。生成物）。
-2. `npm test`（= `node test/run.js`）を実行。ビルド → dist の構文チェック →
+2. `npm test`（= `node --test`）を実行。ビルド → dist の構文チェック →
    全テストまで一括で走る（依存パッケージ不要・AE 不要）。
 3. After Effects の ScriptUI Panels に `dist/EmoLabMaker.jsx` を置いて動作確認。
 
@@ -126,10 +126,14 @@ CI: GitHub Actions（`.github/workflows/test.yml`）が push / PR ごとに `npm
 便利な実行方法（`npm test` の代わりに直接 `node --test` を使う）:
 
 ```sh
-node --test "test/*.test.js"                            # npm test と同じ
-node --test --test-name-pattern="目パチ" "test/*.test.js"  # 名前で絞り込み
-node --test --watch "test/*.test.js"                    # 変更を監視して自動再実行
+node --test                                             # npm test と同じ（既定探索）
+node --test --test-name-pattern="目パチ" test/bake.test.js  # ファイル＋名前で絞り込み
+node --test --watch                                     # 変更を監視して自動再実行
 ```
+
+※ glob 引数（`node --test "test/*.test.js"`）は Node 21+ 限定なので使わない
+（CI や他環境の Node で `Could not find` エラーになる）。引数なしの既定探索は
+`test/` 配下を全部実行する（`helpers.js` もテスト0件のファイルとして通るが無害）。
 
 注意: サンドボックス内で生成されたオブジェクト/配列は別レルムのため、
 `assert.deepEqual`（strict）に渡す前に `helpers.plain()` でプレーン化すること。
