@@ -120,6 +120,9 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 ベイクまわりの変更後は AE での目視確認（ベイク → 再生 → 解除）を必ず行うこと。
 UI 層（tabs/*.jsx）とセットアップ走査（core/psd.jsx / stage-model.jsx）は未テスト。
 
+CI: GitHub Actions（`.github/workflows/test.yml`）が push / PR ごとに `npm test` を
+実行する。リリース（`release.yml`）もビルド前に `npm test` を実行し、テストが通らない限りリリースは失敗する。
+
 便利な実行方法（`npm test` の代わりに直接 `node --test` を使う）:
 
 ```sh

@@ -1,0 +1,25 @@
+name: Test
+
+# push / PR ごとに自動テストを実行する（依存パッケージ不要・AE 不要）。
+# 内容: ビルド + dist 構文チェック + ES3 互換 lint + 式の挙動テスト
+#       + ベイク同値テスト（固定シナリオ / ランダムシナリオ / エッジケース）
+on:
+  push:
+    branches: ["**"] # タグ push は対象外（Release ワークフロー側の Test ステップが担う）
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Test
+        run: npm test
