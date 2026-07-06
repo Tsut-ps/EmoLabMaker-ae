@@ -570,13 +570,16 @@ function applyMappingToLayers(items, phonemeCompName, allCsv, labTag) {
     var emoCtx = null;
     try {
       emoCtx = parseEmoContext(it.layer); // 表情登録済みなら非発話中は表情に従う
-      it.layer.transform.opacity.expression = buildLabMappedExpression(
-        phonemeCompName,
-        it.myCsv,
-        allCsv,
-        it.isClosedFallback,
-        emoCtx,
-        labTag,
+      setOpacityExpression(
+        it.layer,
+        buildLabMappedExpression(
+          phonemeCompName,
+          it.myCsv,
+          allCsv,
+          it.isClosedFallback,
+          emoCtx,
+          labTag,
+        ),
       );
       it.layer.enabled = true;
     } catch (e) {

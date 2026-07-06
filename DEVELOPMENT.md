@@ -24,6 +24,7 @@ src/
     psd.jsx            PSDToolKit 命名解析・走査・自動セットアップ・反転
     blink.jsx          目パチ（自動まばたき）
     stage-model.jsx    立ち絵の階層ツリー構築・active 判定・prefix/表示名
+    bake.jsx           ベイク（式→キーフレーム変換・解除・式パラメータの逆パース）
   ui/                  UI 部品（ScriptUI 依存）
     scriptui.jsx       グリッド計算・チェックマーク・ドロップダウン再構築
     dialogs.jsx        各種ダイアログ（表情セット名・音素コンポ選択・PSD 結果 等）
@@ -55,7 +56,7 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 (function emoLabMaker(thisObj) {           ← build.js が付与
   05_open
   core/layers, core/expressions, core/markers, core/emoset,
-  core/lab, core/psd, core/blink, core/stage-model,
+  core/lab, core/psd, core/blink, core/stage-model, core/bake,
   ui/scriptui, ui/dialogs,
   tabs/lab, tabs/psd, tabs/stage,
   99_close

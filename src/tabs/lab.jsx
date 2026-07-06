@@ -1157,14 +1157,13 @@ mouthRemoveBtn.onClick = function () {
       var emoCtx = parseEmoContext(layer);
       if (emoCtx) {
         // 表情切替の登録に戻す
-        layer.transform.opacity.expression = buildOpacityExpression(
-          emoCtx.ctrlCompName,
-          emoCtx.targetCompName,
+        setOpacityExpression(
+          layer,
+          buildOpacityExpression(emoCtx.ctrlCompName, emoCtx.targetCompName),
         );
         restoredCount++;
       } else {
-        layer.transform.opacity.expression = "";
-        layer.transform.opacity.setValue(100);
+        clearOpacityExpression(layer);
       }
       removedCount++;
     }

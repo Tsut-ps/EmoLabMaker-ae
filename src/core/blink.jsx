@@ -107,14 +107,13 @@ function buildBlinkExpression(params, role, hasMid, openNamesCsv, emoCtx) {
 function removeBlinkFromLayer(layer) {
   var emoCtx = parseEmoContext(layer);
   if (emoCtx) {
-    layer.transform.opacity.expression = buildOpacityExpression(
-      emoCtx.ctrlCompName,
-      emoCtx.targetCompName,
+    setOpacityExpression(
+      layer,
+      buildOpacityExpression(emoCtx.ctrlCompName, emoCtx.targetCompName),
     );
     return true;
   }
-  layer.transform.opacity.expression = "";
-  layer.transform.opacity.setValue(100);
+  clearOpacityExpression(layer);
   return false;
 }
 
