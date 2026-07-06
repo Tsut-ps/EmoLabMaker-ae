@@ -413,11 +413,13 @@ function buildPhonemeSnippet(targetCompName, labTag) {
     "function findPhonemeLayer() {",
     "  for (var i = 1; i <= targetComp.numLayers; i++) {",
     "    var layer = targetComp.layer(i);",
-    '    if (layer.name.indexOf("[Lab] ") !== 0) continue;',
+    "    var nm = layer.name;",
+    '    if (nm.indexOf("[Lab] ") !== 0) continue;',
     // labTag があれば、その文字列を名前に含む [Lab] だけを対象にする（立ち絵ごとの口パク振り分け #B）
-    '    if (labTag !== "" && layer.name.indexOf(labTag) < 0) continue;',
-    "    if (layer.marker.numKeys === 0) continue;",
+    '    if (labTag !== "" && nm.indexOf(labTag) < 0) continue;',
     "    if (time < layer.inPoint || time >= layer.outPoint) continue;",
+    // marker.numKeys は名前・時刻で絞った後に回し、毎フレーム×全レイヤーの評価負荷を下げる
+    "    if (layer.marker.numKeys === 0) continue;",
     "    return layer;",
     "  }",
     "  return null;",

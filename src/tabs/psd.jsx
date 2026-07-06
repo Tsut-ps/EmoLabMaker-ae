@@ -674,6 +674,9 @@ psdSetupBtn.onClick = function () {
     return;
   }
 
+  // レガシー ExtendScript エンジンだと式の評価が遅い → 手動での切替を案内
+  checkExpressionEngine();
+
   var report = autoSetupPsd(rootComp, ctrlComp, selectedGroups);
 
   refreshPsdDropdowns();

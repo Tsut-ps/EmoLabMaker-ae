@@ -228,6 +228,25 @@ function findCompByName(name) {
   return null;
 }
 
+// ── エクスプレッションエンジン確認 ──────────────────────────────
+// AE 16.0(2019)+ はプロジェクトごとにエンジンを選べる。本ツールの式は ES3 互換で
+// 「レガシー ExtendScript」でも動いてしまうが、評価が大幅に遅くプレビューが重くなる
+// レガシー設定を検出したら手動での切替を促す（設定は書き換えない。セットアップ時に呼ぶ）
+function checkExpressionEngine() {
+  var engine = "";
+  try {
+    engine = String(app.project.expressionEngine || "");
+  } catch (e) {
+    return; // 属性が無い旧 AE は対象外
+  }
+  if (engine.indexOf("javascript") === 0) return;
+  alert(
+    "このプロジェクトのエクスプレッションエンジンが「レガシー ExtendScript」です。\n" +
+      "JavaScript に切り替えるとプレビューが大幅に速くなります。\n" +
+      "プロジェクト設定 > エクスプレッション から変更してください。",
+  );
+}
+
 // ── 取り消しグループ（ネスト対策） ───────────────────────────────
 // beginUndo/endUndo はネストしても最外だけが実際の AE undo group を作る。
 // これにより 1 ユーザー操作 = 1 取り消し単位 になり、Ctrl+Z の不整合を防ぐ。
