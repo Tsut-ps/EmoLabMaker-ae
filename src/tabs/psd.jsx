@@ -235,6 +235,102 @@ psdExtendBtn.onClick = function () {
 };
 
 // ══════════════════════════════════════════════════════════════════
+// ベイク（式 → ホールドKF 変換でプレビュー軽量化）
+// ══════════════════════════════════════════════════════════════════
+
+var psdBakePanel = tabPsd.add("panel", undefined, "ベイク（プレビュー軽量化）");
+psdBakePanel.orientation = "column";
+psdBakePanel.alignChildren = ["fill", "top"];
+psdBakePanel.alignment = ["fill", "top"];
+psdBakePanel.margins = 8;
+psdBakePanel.spacing = 4;
+var psdBakeHint = psdBakePanel.add(
+  "statictext",
+  undefined,
+  "式をキーフレームへ変換して再生を軽くする（実験的）",
+);
+psdBakeHint.alignment = ["fill", "top"];
+psdBakeHint.helpTip =
+  "プロジェクト全体の表情/口パク/目パチ式をキーフレームに変換します（式は無効化して保持）。" +
+  "プレビューの式評価がなくなり軽くなります。マーカーを編集したら再度ベイク、" +
+  "編集（立ち絵タブの切替反映）に戻るときは「ベイク解除」を実行してください。" +
+  "ベイク済みレイヤーへのセットアップ/口形/目パチの再適用は、自動で再ベイクされます。";
+var psdBakeRow = psdBakePanel.add("group");
+psdBakeRow.orientation = "row";
+psdBakeRow.alignment = ["fill", "top"];
+psdBakeRow.alignChildren = ["fill", "center"];
+psdBakeRow.spacing = 5;
+var psdBakeBtn = psdBakeRow.add("button", undefined, "ベイク(全体)");
+psdBakeBtn.alignment = ["fill", "center"];
+psdBakeBtn.preferredSize.height = BUTTON_HEIGHT;
+psdBakeBtn.helpTip =
+  "全コンポの表情/口パク/目パチ式をホールドKFに変換（再実行で現在のマーカーから再計算）";
+var psdUnbakeBtn = psdBakeRow.add("button", undefined, "ベイク解除(全体)");
+psdUnbakeBtn.alignment = ["fill", "center"];
+psdUnbakeBtn.preferredSize.height = BUTTON_HEIGHT;
+psdUnbakeBtn.helpTip =
+  "ベイクで作った不透明度KFを削除し、式評価（ライブ切替）に戻す";
+
+psdBakeBtn.onClick = function () {
+  var report;
+  beginUndo("EmoLabMaker: ベイク");
+  try {
+    report = bakeAllExpressions();
+  } finally {
+    endUndo();
+  }
+  var total = report.emo + report.lab + report.blink;
+  if (total === 0 && report.skipped === 0) {
+    alert("ベイク対象（表情/口パク/目パチ式のレイヤー）が見つかりませんでした。");
+    return;
+  }
+  var message =
+    "ベイク完了: " +
+    total +
+    " レイヤー（表情 " +
+    report.emo +
+    " / 口パク " +
+    report.lab +
+    " / 目パチ " +
+    report.blink +
+    "）\nキーフレーム " +
+    report.keys +
+    " 個 / " +
+    report.comps +
+    " コンポ";
+  if (report.skipped > 0) {
+    message +=
+      "\nスキップ: " + report.skipped + " レイヤー（式を解析できず未変更）";
+  }
+  message +=
+    "\n※ マーカーや設定を変えたら再ベイクしてください（式は無効化して保持）";
+  alert(message);
+  psdStatusText.text = "ベイク: " + total + " レイヤー / KF " + report.keys;
+};
+
+psdUnbakeBtn.onClick = function () {
+  var report;
+  beginUndo("EmoLabMaker: ベイク解除");
+  try {
+    report = unbakeAllExpressions();
+  } finally {
+    endUndo();
+  }
+  if (report.restored === 0) {
+    alert("ベイク済みレイヤーが見つかりませんでした。");
+    return;
+  }
+  alert(
+    "ベイク解除: " +
+      report.restored +
+      " レイヤーを式評価に戻しました（" +
+      report.comps +
+      " コンポ）",
+  );
+  psdStatusText.text = "ベイク解除: " + report.restored + " レイヤー";
+};
+
+// ══════════════════════════════════════════════════════════════════
 // 目パチ (自動まばたき)
 // ══════════════════════════════════════════════════════════════════
 
@@ -393,12 +489,9 @@ blinkApplyBtn.onClick = function () {
             continue;
           }
           var emoCtx = parseEmoContext(layer);
-          layer.transform.opacity.expression = buildBlinkExpression(
-            params,
-            rowData.role,
-            hasMid,
-            openNamesCsv,
-            emoCtx,
+          setOpacityExpression(
+            layer,
+            buildBlinkExpression(params, rowData.role, hasMid, openNamesCsv, emoCtx),
           );
           layer.enabled = true;
           appliedCount++;
@@ -635,6 +728,9 @@ psdSetupBtn.onClick = function () {
     psdStatusText.text = "グループが選択されていません。";
     return;
   }
+
+  // レガシー ExtendScript エンジンだと式の評価が遅い → 手動での切替を案内
+  checkExpressionEngine();
 
   var report = autoSetupPsd(rootComp, ctrlComp, selectedGroups);
 

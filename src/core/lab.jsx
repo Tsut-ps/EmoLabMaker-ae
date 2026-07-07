@@ -413,11 +413,13 @@ function buildPhonemeSnippet(targetCompName, labTag) {
     "function findPhonemeLayer() {",
     "  for (var i = 1; i <= targetComp.numLayers; i++) {",
     "    var layer = targetComp.layer(i);",
-    '    if (layer.name.indexOf("[Lab] ") !== 0) continue;',
+    "    var nm = layer.name;",
+    '    if (nm.indexOf("[Lab] ") !== 0) continue;',
     // labTag があれば、その文字列を名前に含む [Lab] だけを対象にする（立ち絵ごとの口パク振り分け #B）
-    '    if (labTag !== "" && layer.name.indexOf(labTag) < 0) continue;',
-    "    if (layer.marker.numKeys === 0) continue;",
+    '    if (labTag !== "" && nm.indexOf(labTag) < 0) continue;',
     "    if (time < layer.inPoint || time >= layer.outPoint) continue;",
+    // marker.numKeys は名前・時刻で絞った後に回し、毎フレーム×全レイヤーの評価負荷を下げる
+    "    if (layer.marker.numKeys === 0) continue;",
     "    return layer;",
     "  }",
     "  return null;",
@@ -645,14 +647,14 @@ function findLabMappedComps() {
 function removeLabMappingFromLayer(layer) {
   var emoCtx = parseEmoContext(layer);
   if (emoCtx) {
-    layer.transform.opacity.expression = buildOpacityExpression(
-      emoCtx.ctrlCompName,
-      emoCtx.targetCompName,
+    // 表情切替の登録へ戻す（ベイク済みなら bake 対応ヘルパーが再ベイクまで面倒を見る）
+    setOpacityExpression(
+      layer,
+      buildOpacityExpression(emoCtx.ctrlCompName, emoCtx.targetCompName),
     );
     return true;
   }
-  layer.transform.opacity.expression = "";
-  layer.transform.opacity.setValue(100);
+  clearOpacityExpression(layer); // ベイクのキーフレームも掃除して素に戻す
   return false;
 }
 
@@ -685,13 +687,16 @@ function applyMappingToLayers(items, phonemeCompName, allCsv, labTag) {
     var emoCtx = null;
     try {
       emoCtx = parseEmoContext(it.layer); // 表情登録済みなら非発話中は表情に従う
-      it.layer.transform.opacity.expression = buildLabMappedExpression(
-        phonemeCompName,
-        it.myCsv,
-        allCsv,
-        it.isClosedFallback,
-        emoCtx,
-        labTag,
+      setOpacityExpression(
+        it.layer,
+        buildLabMappedExpression(
+          phonemeCompName,
+          it.myCsv,
+          allCsv,
+          it.isClosedFallback,
+          emoCtx,
+          labTag,
+        ),
       );
       it.layer.enabled = true;
     } catch (e) {

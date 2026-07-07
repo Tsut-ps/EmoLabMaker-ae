@@ -27,7 +27,15 @@ function buildBlinkExpression(params, role, hasMid, openNamesCsv, emoCtx) {
   ]);
 
   if (emoCtx) {
-    lines.push('var openNames = ",' + escapeExprStr(openNamesCsv) + ',";');
+    // 開き目名は式生成時に配列リテラルへ展開する（毎フレームの split(",") を省く）
+    // レイヤー名にカンマは使わない規約なので CSV 分割で正しく復元できる
+    var openParts = String(openNamesCsv || "").split(",");
+    var openLiterals = [];
+    for (var op = 0; op < openParts.length; op++) {
+      if (openParts[op] === "") continue;
+      openLiterals.push('"' + escapeExprStr(openParts[op]) + '"');
+    }
+    lines.push("var openNames = [" + openLiterals.join(",") + "];");
     lines = lines.concat(
       buildEmoMarkerSnippet(emoCtx.ctrlCompName, emoCtx.targetCompName),
     );
@@ -70,9 +78,8 @@ function buildBlinkExpression(params, role, hasMid, openNamesCsv, emoCtx) {
       "var blinkEnabled = false;",
       "if (markerName !== null) {",
       '  var ms = ("," + markerName + ",");',
-      '  var on = openNames.split(",");',
-      "  for (var bi = 0; bi < on.length; bi++) {",
-      '    if (on[bi] !== "" && ms.indexOf("," + on[bi] + ",") >= 0) { blinkEnabled = true; break; }',
+      "  for (var bi = 0; bi < openNames.length; bi++) {",
+      '    if (ms.indexOf("," + openNames[bi] + ",") >= 0) { blinkEnabled = true; break; }',
       "  }",
       "}",
       "var result;",
@@ -100,14 +107,13 @@ function buildBlinkExpression(params, role, hasMid, openNamesCsv, emoCtx) {
 function removeBlinkFromLayer(layer) {
   var emoCtx = parseEmoContext(layer);
   if (emoCtx) {
-    layer.transform.opacity.expression = buildOpacityExpression(
-      emoCtx.ctrlCompName,
-      emoCtx.targetCompName,
+    setOpacityExpression(
+      layer,
+      buildOpacityExpression(emoCtx.ctrlCompName, emoCtx.targetCompName),
     );
     return true;
   }
-  layer.transform.opacity.expression = "";
-  layer.transform.opacity.setValue(100);
+  clearOpacityExpression(layer);
   return false;
 }
 

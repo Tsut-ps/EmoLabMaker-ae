@@ -24,6 +24,7 @@ src/
     psd.jsx            PSDToolKit 命名解析・走査・自動セットアップ・反転
     blink.jsx          目パチ（自動まばたき）
     stage-model.jsx    立ち絵の階層ツリー構築・active 判定・prefix/表示名
+    bake.jsx           ベイク（式→キーフレーム変換・解除・式パラメータの逆パース）
   ui/                  UI 部品（ScriptUI 依存）
     scriptui.jsx       グリッド計算・チェックマーク・ドロップダウン再構築
     dialogs.jsx        各種ダイアログ（表情セット名・音素コンポ選択・PSD 結果 等）
@@ -33,6 +34,15 @@ src/
     stage.jsx          立ち絵タブ
   99_close.jsx         onResizing / tabs.onChange / onActivate / init・IIFE 終了
 
+test/                  Node で動く自動テスト（AE 不要・依存パッケージ不要）
+  helpers.js           core/*.jsx の vm 読み込みと AE モック・式評価・KF 階段値
+  build.test.js        ビルド実行と dist の構文チェック
+  es3.test.js          ES3(ExtendScript) 互換 lint（const/let/アロー等の混入検出）
+  expressions.test.js  式の挙動テスト（表情集合 / 口形 / 目パチ / 逆パーサ）
+  bake.test.js         ベイク同値テスト（ベイク KF の階段値 ＝ 式の評価値）
+  random-equivalence.test.js  シード固定ランダムシナリオでのベイク同値テスト
+
+package.json           npm scripts のみ（build / test）。依存パッケージなし
 build.js               src/*.jsx を連結して dist/EmoLabMaker.jsx を生成
 dist/EmoLabMaker.jsx   生成物（.gitignore 対象・コミットしない。配布は Releases）
 ```
@@ -55,7 +65,7 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 (function emoLabMaker(thisObj) {           ← build.js が付与
   05_open
   core/layers, core/expressions, core/markers, core/emoset,
-  core/lab, core/psd, core/blink, core/stage-model,
+  core/lab, core/psd, core/blink, core/stage-model, core/bake,
   ui/scriptui, ui/dialogs,
   tabs/lab, tabs/psd, tabs/stage,
   99_close
@@ -78,10 +88,62 @@ node build.js   # 依存パッケージ不要（Node 標準のみ）
 ## 開発フロー
 
 1. **`src/` の該当ファイルを編集**（`dist/` は触らない。生成物）。
-2. `node build.js` で再生成。
-3. 構文チェック: `dist/EmoLabMaker.jsx` を `.js` にコピーして `node --check`
-   （Node によっては `.jsx` 拡張子を直接 check できないため）。
-4. After Effects の ScriptUI Panels に `dist/EmoLabMaker.jsx` を置いて動作確認。
+2. `npm test`（= `node --test`）を実行。ビルド → dist の構文チェック →
+   全テストまで一括で走る（依存パッケージ不要・AE 不要）。
+3. After Effects の ScriptUI Panels に `dist/EmoLabMaker.jsx` を置いて動作確認。
+
+ビルドだけなら `npm run build`（= `node build.js`）。
+
+## テスト
+
+`test/` は Node 単体で動く（ScriptUI に依存しない `core/*.jsx` を vm サンドボックスへ
+読み込み、AE のレイヤー/マーカー/コンポをモックして検証する）。式は「最後の文の値が
+結果」＝ vm の完了値セマンティクスと同じなので、生成された式を本物どおり評価できる。
+ランナーは Node 組み込みの `node:test`（Node 18+。依存パッケージなし）。
+
+- `build.test.js` … `build.js` の実行と dist の構文チェック（vm.Script でコンパイル）
+- `es3.test.js` … **ES3 互換 lint**。他のテストは Node(V8) 上で src を実行するため、
+  ES3 に無い構文/API（const/let/アロー/ES5+ メソッド/JSON 等）が混入してもテストは
+  通ってしまう。ここで src 全体を走査して機械的に検出する（式に埋め込む文字列も対象）
+- `expressions.test.js` … 式の挙動（表情集合 membership / 口形マッピング / 目パチ /
+  `parseEmoContext` のラウンドトリップ）
+- `bake.test.js` … **ベイク同値テスト**。ベイクが書くホールド KF の階段値と、実際の
+  式の評価値を時間軸全域（等間隔＋KF 境界前後）で比較する。エッジケース
+  （[Lab] の重なり・空割当サプレス・尺境界マーカー・目パチ極値）も含む
+- `random-equivalence.test.js` … ベイク同値をシード固定の疑似乱数シナリオ
+  （マーカー配置・in/out・パラメータをランダム生成）で叩く。シード固定なので
+  毎回同じ列＝再現可能。マーカー時刻は 0.01s グリッドで生成する
+  （MARKER_EPSILON 未満の近接マーカーはベイクが丸めるため、既知の許容差）
+
+テストが保証**しない**もの（既知の限界）: AE 実機の API 挙動（KF 書き込み・
+時刻量子化・expressionEnabled の副作用）はモックの再現に依存するため、
+ベイクまわりの変更後は AE での目視確認（ベイク → 再生 → 解除）を必ず行うこと。
+UI 層（tabs/*.jsx）とセットアップ走査（core/psd.jsx / stage-model.jsx）は未テスト。
+
+CI: GitHub Actions（`.github/workflows/test.yml`）が push / PR ごとに `npm test` を
+実行する。リリース（`release.yml`）もビルド前に `npm test` を実行し、テストが通らない限りリリースは失敗する。
+
+便利な実行方法（`npm test` の代わりに直接 `node --test` を使う）:
+
+```sh
+node --test                                             # npm test と同じ（既定探索）
+node --test --test-name-pattern="目パチ" test/bake.test.js  # ファイル＋名前で絞り込み
+node --test --watch                                     # 変更を監視して自動再実行
+```
+
+※ glob 引数（`node --test "test/*.test.js"`）は Node 21+ 限定なので使わない
+（CI や他環境の Node で `Could not find` エラーになる）。引数なしの既定探索は
+`test/` 配下を全部実行する（`helpers.js` もテスト0件のファイルとして通るが無害）。
+
+注意: サンドボックス内で生成されたオブジェクト/配列は別レルムのため、
+`assert.deepEqual`（strict）に渡す前に `helpers.plain()` でプレーン化すること。
+
+> [!IMPORTANT]
+> 切替ロジックは「式ビルダー（expressions/lab/blink.jsx）」と「ベイクエンジン
+> （core/bake.jsx のスクリプト再実装）」の**二重管理**になっている。さらに逆パーサ
+> （`parseEmoContext` / `parseLabMapContext` / `parseBlinkContext`）が式の文面に依存する。
+> **式の挙動や埋め込み変数の書式を変えたら、bake.jsx とパーサも更新すること。**
+> 片方だけ変えると `bake.test.js` の同値テストが落ちて検出される。
 
 > [!NOTE]
 > `src/*.jsx` は連結後に同一クロージャへ入る前提なので、エディタで開くと

@@ -118,6 +118,53 @@ function parseEmoContext(layer) {
 // 登録 / 解除
 // ══════════════════════════════════════════════════════════════════
 
+function hasEmoSignatures(expr) {
+  if (!expr) return false;
+  return (
+    expr.indexOf(EXPR_SIGNATURE) >= 0 ||
+    expr.indexOf(LAB_MAP_SIGNATURE) >= 0 ||
+    expr.indexOf(BLINK_SIGNATURE) >= 0
+  );
+}
+
+/**
+ * 不透明度式を設定して有効化する。ベイク済みレイヤーに再セットアップ/再適用したときは、
+ * ベイク KF を掃除して差し替えたうえで、新しい式で即座に再ベイクする。
+ */
+function setOpacityExpression(layer, expression) {
+  var prop = layer.transform.opacity;
+  var wasBaked = false;
+  try {
+    if (!prop.expressionEnabled && hasEmoSignatures(prop.expression)) {
+      wasBaked = true;
+      for (var k = prop.numKeys; k >= 1; k--) prop.removeKey(k);
+      prop.setValue(100);
+    }
+  } catch (e) {}
+  prop.expression = expression;
+  prop.expressionEnabled = true;
+  if (wasBaked) {
+    try {
+      bakeLayerAuto(layer); // 失敗時はライブ式のまま（動作は正しい）
+    } catch (e2) {}
+  }
+}
+
+/** 不透明度式を除去して 100 に戻す（ベイク KF・無効化フラグも掃除） */
+function clearOpacityExpression(layer) {
+  var prop = layer.transform.opacity;
+  try {
+    if (!prop.expressionEnabled) {
+      for (var k = prop.numKeys; k >= 1; k--) prop.removeKey(k);
+    }
+  } catch (e) {}
+  prop.expression = "";
+  try {
+    prop.expressionEnabled = true;
+  } catch (e2) {}
+  prop.setValue(100);
+}
+
 function registerLayers(targetComp, ctrlCompName, layers, undoName) {
   if (!layers || layers.length === 0) return 0;
 
@@ -129,7 +176,7 @@ function registerLayers(targetComp, ctrlCompName, layers, undoName) {
     for (var i = 0; i < layers.length; i++) {
       var layer = layers[i];
       if (!layer) continue;
-      layer.transform.opacity.expression = expression;
+      setOpacityExpression(layer, expression);
       layer.enabled = true;
       count++;
     }
@@ -156,8 +203,7 @@ function removeExpressionBySignature(layers, signature) {
       continue;
     }
     if (!expr || expr.indexOf(signature) < 0) continue;
-    layer.transform.opacity.expression = "";
-    layer.transform.opacity.setValue(100);
+    clearOpacityExpression(layer);
     count++;
   }
   return count;
