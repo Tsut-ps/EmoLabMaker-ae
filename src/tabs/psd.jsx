@@ -479,9 +479,30 @@ blinkApplyBtn.onClick = function () {
   var appliedCount = 0;
   var emoLinkedCount = 0;
   var skippedCount = 0;
+  var blinkAutoReg = 0;
 
   beginUndo("EmoLabMaker: 目パチ設定");
   try {
+    // 立ち絵タブ未経由のグループでも表情連動（開き目表情中のみまばたき）が成立するよう、
+    // 対象コンポをクリック時と同じ状態（emo 登録済み）にする
+    var blinkComps = [];
+    var blinkCompSeen = {};
+    for (var bcR = 0; bcR < blinkRows.length; bcR++) {
+      for (var bcI = 0; bcI < blinkRows[bcR].layers.length; bcI++) {
+        try {
+          var bcc = blinkRows[bcR].layers[bcI].containingComp;
+          if (bcc && !blinkCompSeen[bcc.id]) {
+            blinkCompSeen[bcc.id] = true;
+            blinkComps.push(bcc);
+          }
+        } catch (eBc) {}
+      }
+    }
+    for (var bcE = 0; bcE < blinkComps.length; bcE++) {
+      var bReg = ensureCompRegisteredForApply(blinkComps[bcE]);
+      if (bReg > 0) blinkAutoReg += bReg;
+    }
+
     for (var r = 0; r < blinkRows.length; r++) {
       var rowData = blinkRows[r];
       for (var i = 0; i < rowData.layers.length; i++) {
@@ -495,7 +516,13 @@ blinkApplyBtn.onClick = function () {
           var emoCtx = parseEmoContext(layer);
           setOpacityExpression(
             layer,
-            buildBlinkExpression(params, rowData.role, hasMid, openNamesCsv, emoCtx),
+            buildBlinkExpression(
+              params,
+              rowData.role,
+              hasMid,
+              openNamesCsv,
+              emoCtx,
+            ),
           );
           layer.enabled = true;
           appliedCount++;
@@ -515,6 +542,9 @@ blinkApplyBtn.onClick = function () {
       "\n表情切替と共存: " +
       emoLinkedCount +
       " レイヤー（開き目表情中のみまばたき）";
+  }
+  if (blinkAutoReg > 0) {
+    message += "\n表情切替へ自動登録: " + blinkAutoReg + " レイヤー";
   }
   if (skippedCount > 0) {
     message +=
@@ -757,29 +787,23 @@ psdSetupBtn.onClick = function () {
     return;
   }
 
-  var selectedGroups = showPsdScanDialog(rootComp, groups);
-  if (!selectedGroups) {
+  if (!showPsdScanDialog(rootComp, groups)) {
     psdStatusText.text = "キャンセルしました。";
-    return;
-  }
-  if (selectedGroups.length === 0) {
-    psdStatusText.text = "グループが選択されていません。";
     return;
   }
 
   // レガシー ExtendScript エンジンだと式の評価が遅い → 手動での切替を案内
   checkExpressionEngine();
 
-  var report = autoSetupPsd(rootComp, ctrlComp, selectedGroups);
+  var report = autoSetupPsd(rootComp, ctrlComp, groups);
 
   refreshPsdDropdowns();
 
   showPsdReportDialog(report);
   psdStatusText.text =
-    "完了: " +
+    "完了: 更新 " +
     report.groupCount +
-    " グループ / 新規 " +
-    report.registered +
-    " / 更新 " +
-    report.updated;
+    " グループ / 未使用 " +
+    report.passed +
+    " グループ";
 };

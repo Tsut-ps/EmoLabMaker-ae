@@ -134,27 +134,29 @@ function isItemAtProjectRoot(comp) {
   }
 }
 
-// PSDタブに出す候補 = プロジェクト直下のコンポのうち、
-// PSD 由来（レイヤーフォルダ or .psd フッテージ）か、セットアップ済み（[Emo]）のもの。
-// 検出できなければ直下コンポ全部 → それも無ければアクティブコンポにフォールバック。
+// セットアップタブに出すルート候補。セットアップできるルートは自由（PSD 以外の手組み立ち絵にも対応）
+// プロジェクト直下の全コンポを候補にし、PSD 由来（レイヤーフォルダ or .psd フッテージ）か、
+// セットアップ済みのものを先頭に並べる。直下に何も無ければアクティブコンポにフォールバック。
 function collectPsdRootCandidates() {
   var all = getProjectComps();
-  var out = [];
-  var rootLevel = [];
+  var preferred = [];
+  var others = [];
   var i;
   for (i = 0; i < all.length; i++) {
     if (!isItemAtProjectRoot(all[i])) continue;
-    rootLevel.push(all[i]);
     if (
       hasPsdLayersFolder(all[i]) ||
       hasPsdFootage(all[i]) ||
+      hasSetupTag(all[i]) ||
       hasCtrlPrefixedLayer(all[i])
     ) {
-      out.push(all[i]);
+      preferred.push(all[i]);
+    } else {
+      others.push(all[i]);
     }
   }
+  var out = preferred.concat(others);
   if (out.length > 0) return out;
-  if (rootLevel.length > 0) return rootLevel;
   var ac = getActiveComp();
   return ac ? [ac] : [];
 }

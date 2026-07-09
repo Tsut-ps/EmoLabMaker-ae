@@ -431,6 +431,106 @@ function bakeBlinkLayer(layer, comp, emoCache) {
 }
 
 /**
+ * ベイク中リネームの修復。
+ * AE はコンポをリネームすると式内の comp("名前") を自動更新するが、
+ * ベイクで無効化（expressionEnabled=false）された式のテキストは更新されない。
+ * 再ベイク／ベイク解除の前に、参照先が実在しない comp("名前") を実物から特定して
+ * 式テキストを補正する。特定できなければそのまま（従来挙動＝スキップ扱い）。
+ */
+// 迷子になった名前の解決先を決める。候補 1 つ＝自動採用 / 複数＝選択ダイアログ / 0 ＝諦め（null）。
+// 結果は cache（1 回のベイク/解除の実行単位）に覚え、同じ名前で何度もダイアログを出さない
+function resolveRenamedComp(cache, kind, oldName, candidates) {
+  // キーには候補リストも含める。同名の旧コンポが複数あった場合（AE はコンポの同名重複を許す）、
+  // ターゲットごとに候補が異なり得るため、旧名だけをキーにすると別ターゲットへ誤った解決結果を流用してしまう
+  var key = kind + "\n" + oldName + "\n" + candidates.join("\n");
+  if (cache[key] !== undefined) return cache[key];
+  var resolved = null;
+  if (candidates.length === 1) {
+    resolved = candidates[0];
+  } else if (candidates.length > 1) {
+    resolved = promptCompSelection(
+      "ベイク中にコンポ名が変更されたようです。\n" +
+        "「" +
+        oldName +
+        "」（" +
+        kind +
+        "）の参照先を選択してください:",
+      candidates,
+      candidates[0],
+    );
+  }
+  cache[key] = resolved;
+  return resolved;
+}
+
+function repairExpressionCompRefs(layer, cache) {
+  var prop;
+  var expr;
+  try {
+    prop = layer.transform.opacity;
+    expr = prop.expression;
+  } catch (e) {
+    return;
+  }
+  if (!expr) return;
+  cache = cache || {};
+  var changed = false;
+
+  // 表情（合成式の表情部分を含む）: 制御コンポ名。
+  // 実物は「[Emo] <ターゲット名> レイヤーを持つコンポ」から特定（名前非依存）。
+  // ターゲット名はコンポ名一意化により通常 1 件だが、旧制御に [Emo] が残っている等で複数ヒットしたら選択させる
+  var emoCtx = parseEmoContext(layer);
+  if (emoCtx && !findCompByName(emoCtx.ctrlCompName)) {
+    var hits = [];
+    var comps = getProjectComps();
+    for (var i = 0; i < comps.length; i++) {
+      if (findCtrlLayerInComp(comps[i], emoCtx.targetCompName, 0)) {
+        hits.push(comps[i].name);
+      }
+    }
+    var newCtrl = resolveRenamedComp(cache, "制御コンポ", emoCtx.ctrlCompName, hits);
+    if (newCtrl) {
+      expr = expr
+        .split(escapeExprStr(emoCtx.ctrlCompName))
+        .join(escapeExprStr(newCtrl));
+      changed = true;
+    }
+  }
+
+  // 口パク: 音素コンポ名。[Lab] を持つコンポから特定（複数なら選択させる）
+  var labCtx = parseLabMapContext(layer);
+  if (labCtx && !findCompByName(labCtx.phonemeCompName)) {
+    var labComps = findLabComps();
+    var labNames = [];
+    for (var L = 0; L < labComps.length; L++) labNames.push(labComps[L].name);
+    var newPhoneme = resolveRenamedComp(
+      cache,
+      "音素コンポ",
+      labCtx.phonemeCompName,
+      labNames,
+    );
+    if (newPhoneme) {
+      expr = expr
+        .split(escapeExprStr(labCtx.phonemeCompName))
+        .join(escapeExprStr(newPhoneme));
+      changed = true;
+    }
+  }
+
+  if (changed) {
+    // 式の代入が expressionEnabled を変えないよう、元の状態を保って書き戻す
+    var wasEnabled = true;
+    try {
+      wasEnabled = prop.expressionEnabled;
+    } catch (e2) {}
+    prop.expression = expr;
+    try {
+      prop.expressionEnabled = wasEnabled;
+    } catch (e3) {}
+  }
+}
+
+/**
  * レイヤーの現在の式種別を判定して即ベイクする。
  * ベイク済みレイヤーへ式を再適用したとき（setOpacityExpression）に、
  * ベイク状態を維持したまま新しい内容を反映するために使う。
@@ -451,6 +551,7 @@ function bakeLayerAuto(layer) {
     return null;
   }
   if (!expr) return null;
+  repairExpressionCompRefs(layer); // ベイク中リネームの参照補正
   if (expr.indexOf(LAB_MAP_SIGNATURE) >= 0) return bakeLabLayer(layer, comp, {}, {});
   if (expr.indexOf(BLINK_SIGNATURE) >= 0) return bakeBlinkLayer(layer, comp, {});
   if (expr.indexOf(EXPR_SIGNATURE) >= 0) return bakeEmoLayer(layer, comp, {});
@@ -468,6 +569,7 @@ function bakeAllExpressions() {
   var report = { emo: 0, lab: 0, blink: 0, keys: 0, comps: 0, skipped: 0 };
   var emoCache = {};
   var labCache = {};
+  var repairCache = {}; // リネーム補正の解決結果（同じ名前で何度も聞かない）
   var comps = getProjectComps();
   for (var c = 0; c < comps.length; c++) {
     var comp = comps[c];
@@ -486,6 +588,8 @@ function bakeAllExpressions() {
       var isBlink = !isLab && expr.indexOf(BLINK_SIGNATURE) >= 0;
       var isEmo = !isLab && !isBlink && expr.indexOf(EXPR_SIGNATURE) >= 0;
       if (!isLab && !isBlink && !isEmo) continue;
+      // ベイク中にコンポがリネームされた場合の参照補正（無効化中の式は AE の自動リネームから漏れるため）
+      repairExpressionCompRefs(layer, repairCache);
       var keyCount = null;
       try {
         if (isLab) keyCount = bakeLabLayer(layer, comp, emoCache, labCache);
@@ -516,6 +620,7 @@ function bakeAllExpressions() {
  */
 function unbakeAllExpressions() {
   var report = { restored: 0, comps: 0 };
+  var repairCache = {}; // リネーム補正の解決結果（同じ名前で何度も聞かない）
   var comps = getProjectComps();
   for (var c = 0; c < comps.length; c++) {
     var comp = comps[c];
@@ -540,6 +645,8 @@ function unbakeAllExpressions() {
       }
       if (prop.expressionEnabled) continue; // ベイクされていない
       try {
+        // ベイク中にコンポがリネームされていたら、式を有効化する前に参照を補正
+        repairExpressionCompRefs(layer, repairCache);
         for (var k = prop.numKeys; k >= 1; k--) prop.removeKey(k);
         prop.setValue(100);
         prop.expressionEnabled = true;

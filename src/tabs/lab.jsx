@@ -1073,27 +1073,36 @@ mouthApplyBtn.onClick = function () {
     } catch (eCc) {}
   }
   var suppressCount = 0;
-  for (var tc = 0; tc < targetComps.length; tc++) {
-    var gcomp = targetComps[tc];
-    for (var s = 1; s <= gcomp.numLayers; s++) {
-      var sly = gcomp.layer(s);
-      if (isSystemLayerName(sly.name)) continue;
-      if (mappedNames[sly.name]) continue;
-      if (!isRegistered(sly)) continue; // 表情登録済みのみ対象
-      if (
-        hasOpacitySignature(sly, LAB_MAP_SIGNATURE) ||
-        hasOpacitySignature(sly, BLINK_SIGNATURE)
-      ) {
-        continue; // 既に口パク/目パチ済みは触らない
-      }
-      items.push({ layer: sly, myCsv: "", isClosedFallback: false });
-      suppressCount++;
-    }
-  }
-
+  var autoRegistered = 0;
   var result;
   beginUndo("lab2layer: 口形状マッピング適用");
   try {
+    // 立ち絵タブ未経由のグループでも表情連動とサプレスが成立するよう、
+    // 対象コンポをクリック時と同じ状態（グループ全体を emo 登録済み）にする
+    for (var er = 0; er < targetComps.length; er++) {
+      var regCount = ensureCompRegisteredForApply(targetComps[er]);
+      if (regCount > 0) autoRegistered += regCount;
+    }
+
+    // グループ優先サプレスの収集（自動登録の後＝新規登録分も対象に入る）
+    for (var tc = 0; tc < targetComps.length; tc++) {
+      var gcomp = targetComps[tc];
+      for (var s = 1; s <= gcomp.numLayers; s++) {
+        var sly = gcomp.layer(s);
+        if (isSystemLayerName(sly.name)) continue;
+        if (mappedNames[sly.name]) continue;
+        if (!isRegistered(sly)) continue; // 表情登録済みのみ対象
+        if (
+          hasOpacitySignature(sly, LAB_MAP_SIGNATURE) ||
+          hasOpacitySignature(sly, BLINK_SIGNATURE)
+        ) {
+          continue; // 既に口パク/目パチ済みは触らない
+        }
+        items.push({ layer: sly, myCsv: "", isClosedFallback: false });
+        suppressCount++;
+      }
+    }
+
     result = applyMappingToLayers(
       items,
       phonemeCompName,
@@ -1117,6 +1126,9 @@ mouthApplyBtn.onClick = function () {
       "\n表情切替と共存: " +
       emoLinkedCount +
       " レイヤー（非発話中は表情に従います）";
+  }
+  if (autoRegistered > 0) {
+    message += "\n表情切替へ自動登録: " + autoRegistered + " レイヤー";
   }
   if (suppressCount > 0) {
     message +=

@@ -153,10 +153,24 @@ function isManagedStageLayer(layer) {
   }
 }
 
+// シーン直下のコンポ参照が「立ち絵関連」か
+// セットアップ済みタグ / 制御レイヤー / 管理下レイヤー（emo/口パク/目パチの式付き）のいずれかを持てば関連とみなす。
+// （管理下レイヤーの条件は、タグの無い旧バージョンのプロジェクト救済）
+function isStageRelatedComp(comp) {
+  if (hasSetupTag(comp) || hasCtrlPrefixedLayer(comp)) return true;
+  for (var i = 1; i <= comp.numLayers; i++) {
+    if (isManagedStageLayer(comp.layer(i))) return true;
+  }
+  return false;
+}
+
 function buildStageNodes(rootComp) {
   var visited = {};
   if (!rootComp) return [];
   var stageRootPrefix = rootComp.name + "_";
+  // ルート自身が立ち絵ルート（セットアップ済み or PSD 由来）なら、直下のフォルダは立ち絵のパーツなので全部辿る。
+  // そうでない（＝シーンコンポを選んだ）場合は、直下のコンポ参照のうち立ち絵関連だけ辿り、背景・フレーム等は選択肢に出さない
+  var rootIsCharacter = hasSetupTag(rootComp) || hasPsdLayersFolder(rootComp);
   // コンポごとに検出した prefix を優先し、無ければルート名prefix を剥がしてから
   // */! を判定する。これで外側コンポをルートに選んでも種別・ラベルが正しく出る。
   function parseMarkerName(name, compPrefix) {
@@ -192,13 +206,18 @@ function buildStageNodes(rootComp) {
       } catch (eNull) {}
       if (isNull) continue;
 
-      var parsed = parseMarkerName(layer.name, compPrefix);
-
       var src = null;
       try {
         src = layer.source;
       } catch (e) {}
       var isFolder = !!(src && src instanceof CompItem);
+
+      // シーン直下の無関係コンポ（背景・フレーム・未セットアップの立ち絵等）は、選択肢にもツリーにも出さない
+      if (isRoot && !rootIsCharacter && isFolder && !isStageRelatedComp(src)) {
+        continue;
+      }
+
+      var parsed = parseMarkerName(layer.name, compPrefix);
 
       if (parsed.flipx || parsed.flipy) {
         // 反転バリエーション。ループ後に base 選択肢へ「ペア」として束ねる。
@@ -231,11 +250,17 @@ function buildStageNodes(rootComp) {
         // （フォルダはサブ階層を持ちつつ、自身も丸ごと表示/非表示できる）。
         // ただしルート（シーンコンポ）を立ち絵に選ぶと、シーンに手置きした装飾
         // レイヤー（カメラ/ライト/テキスト/図形など）が（ルート）に紛れ込む。
-        // 立ち絵の部品はセットアップ時に必ず管理下の式（emo/口パク/目パチ）が
-        // 付くので、ルート直下では「フォルダ」か「管理下の式を持つ」ものだけを
-        // 任意指定として出し、それ以外（装飾レイヤー）は除外する。
+        // ルート直下では「フォルダ」「管理下の式を持つ」「ルートが PSD 由来」の
+        // いずれかだけ任意指定として出し、それ以外（装飾レイヤー）は除外する。
+        // PSD 由来ルートを条件に加えるのは、式の登録がクリック時になったため
+        // （未登録でも選択肢に出さないと、永遠にクリックできない）。
         // ネストした部品コンポ内の無印リーフは従来どおり出す（クリックで自動登録できる）。
-        if (isRoot && !isFolder && !isManagedStageLayer(layer)) {
+        if (
+          isRoot &&
+          !isFolder &&
+          !isManagedStageLayer(layer) &&
+          !hasPsdLayersFolder(comp)
+        ) {
           continue; // ルート直下のシーン装飾レイヤー → 選択肢にしない
         }
         optional.push({
@@ -404,46 +429,363 @@ function isRadioGroupUnselected(node) {
   return true;
 }
 
-// この階層の選択肢レイヤー（ラジオ/任意）が表示制御に応答できる状態か保証する。
-// PSD で非表示だったレイヤーは AE 上で目(enabled)が消えて取り込まれ、未登録だと
-// マーカーを切り替えても表示されない。クリック時に登録＋目ONを確実にしておく。
-function ensureNodeRegistered(node) {
-  if (!node || !node.ctrlComp) return;
-  var arrs = [node.radioChoices, node.optionalChoices];
-  var toReg = [];
-  // base レイヤーと、そのペアの反転レイヤーをまとめて対象にする
-  var layers = [];
-  for (var a = 0; a < arrs.length; a++) {
-    for (var i = 0; i < arrs[a].length; i++) {
-      if (arrs[a][i].layer) layers.push(arrs[a][i].layer);
-      var fl = arrs[a][i].flips || [];
-      for (var f = 0; f < fl.length; f++) {
-        if (fl[f].layer) layers.push(fl[f].layer);
+// PSD 取り込み時の表示状態（enabled）から既定の表示中集合を作る。
+// セットアップの既定マーカーと同じ思想（排他=表示中の変種1つ / 任意=表示中すべて）。
+// registerLayers が目を点ける前に呼ぶこと。
+function collectDefaultVisibleNames(node) {
+  function enabledOf(ly) {
+    try {
+      return !!(ly && ly.enabled);
+    } catch (e) {
+      return false;
+    }
+  }
+  function visibleVariantName(choice) {
+    if (enabledOf(choice.layer)) return choice.fullName;
+    var flips = choice.flips || [];
+    for (var f = 0; f < flips.length; f++) {
+      if (enabledOf(flips[f].layer)) return flips[f].fullName;
+    }
+    return null;
+  }
+  var names = [];
+  var i;
+  for (i = 0; i < node.radioChoices.length; i++) {
+    var vis = visibleVariantName(node.radioChoices[i]);
+    if (vis) {
+      names.push(vis); // 排他は最初に表示中だった1つだけ
+      break;
+    }
+  }
+  for (i = 0; i < node.optionalChoices.length; i++) {
+    var ov = visibleVariantName(node.optionalChoices[i]);
+    if (ov) names.push(ov);
+  }
+  return names;
+}
+
+/**
+ * 制御ヌルが無ければこの場で用意する（セットアップ未実行のグループ対策）。
+ * 無いまま registerLayers すると式が参照先を失って全非表示になり、マーカー書き込みも無言で失敗する。
+ * セットアップ相当の付帯処理も最小限で行う:
+ * - コンポ名の衝突解消（複数立ち絵の「口」同名対策。「口 2」形式）。
+ *   <ルート名>_ を付ける正規の一意化はセットアップの仕事のまま
+ *   （立ち絵タブのルートはシーンコンポのことがあり、誤った prefix を焼き込むと後のセットアップで多段リネームになるため）
+ * - 既定マーカー（登録で目が点く前の表示状態を保存。無いと初クリックで任意指定パーツが全部消える）
+ */
+function ensureCtrlLayerForNode(node) {
+  var existing = findCtrlLayerInComp(node.ctrlComp, node.comp.name, 0);
+  if (existing) {
+    // 制御はあるがマーカー皆無（過去バージョンの残骸等）なら既定マーカーだけ補う
+    var hasMarkers = false;
+    try {
+      hasMarkers = existing.property("Marker").numKeys > 0;
+    } catch (eM) {}
+    if (!hasMarkers) {
+      writeMarkerNameAtTime(
+        node.ctrlComp,
+        node.comp.name,
+        0,
+        collectDefaultVisibleNames(node).join(","),
+      );
+    }
+    return;
+  }
+
+  // 自コンポ＝制御コンポは改名しない（式の comp("制御名") 参照を壊さない）
+  if (
+    node.comp.id !== node.ctrlComp.id &&
+    !node.isRoot &&
+    compNameTaken(node.comp.name, node.comp)
+  ) {
+    var oldName = node.comp.name;
+    node.comp.name = makeUniqueCompName(oldName, node.comp);
+    migrateGroupRename(node.comp, oldName, node.comp.name);
+  }
+
+  var defaultNames = collectDefaultVisibleNames(node);
+  createCtrlLayer(node.ctrlComp, node.comp.name);
+  writeMarkerNameAtTime(node.ctrlComp, node.comp.name, 0, defaultNames.join(","));
+}
+
+/**
+ * 既存のマーカー運用に、静的に表示されていた未登録レイヤーを合流させる。
+ * 未登録レイヤーはマーカーに関係なく表示されているため、そのまま登録すると
+ * 集合に名前が無く消えてしまう（元から目が点いていた表情が、隣の選択肢をクリックした瞬間に消える）。
+ * 見た目を変えないよう各集合へ補う:
+ *   任意: この選択肢のどの変種も含まない集合すべてに追加
+ *   排他: このノードの排他変種がどれも含まれない集合にだけ追加
+ *        （既に別の排他が選ばれている区間はマーカーが真実＝静的表示との二重表示をここで解消する）
+ * 既定マーカー作成直後は名前が既に入っているため何も起きない（冪等）。
+ */
+function mergeVisibleIntoMarkers(node, entries) {
+  if (!entries || entries.length === 0) return;
+  var ctrlName = getCtrlLayerName(node.comp.name);
+  var radioAll = collectRadioVariantNames(node);
+  for (var i = 1; i <= node.ctrlComp.numLayers; i++) {
+    var ly = node.ctrlComp.layer(i);
+    if (ly.name !== ctrlName) continue;
+    var marker;
+    try {
+      marker = ly.property("Marker");
+    } catch (e) {
+      continue;
+    }
+    for (var k = 1; k <= marker.numKeys; k++) {
+      var set = parseSetString(marker.keyValue(k).comment);
+      var changed = false;
+      for (var e2 = 0; e2 < entries.length; e2++) {
+        var ent = entries[e2];
+        if (indexOfName(set, ent.name) >= 0) continue;
+        // 排他は「同ノードの排他変種のどれか」、任意は「自分の変種」が既に集合に居るなら追加しない
+        var blockers =
+          ent.kind === "radio" ? radioAll : choiceAllNames(ent.choice);
+        var represented = false;
+        for (var b = 0; b < blockers.length; b++) {
+          if (indexOfName(set, blockers[b]) >= 0) {
+            represented = true;
+            break;
+          }
+        }
+        if (represented) continue;
+        set.push(ent.name);
+        changed = true;
+      }
+      if (changed) {
+        marker.setValueAtTime(marker.keyTime(k), new MarkerValue(set.join(",")));
       }
     }
   }
-  for (var k = 0; k < layers.length; k++) {
-    var ly = layers[k];
-    if (!ly) continue;
-    if (
-      !isRegistered(ly) &&
-      !hasOpacitySignature(ly, LAB_MAP_SIGNATURE) &&
-      !hasOpacitySignature(ly, BLINK_SIGNATURE)
-    ) {
-      toReg.push(ly);
-    } else {
-      // 既に式が付いていても、PSD 由来で目が消えていれば点ける
+}
+
+/**
+ * マーカー由来の表示中集合に「未登録（式なし）で目が点いている」選択肢を合成する。
+ * 未登録レイヤーはマーカーに関係なく見えているため、チェック表示・未選択警告が見た目と一致するようにする
+ * （クリック時は ensureNodeRegistered が合流させる）。
+ */
+function augmentVisibleSetWithStatic(node, set) {
+  var out = set.slice();
+  function addStaticVariants(choice) {
+    var variants = [{ fullName: choice.fullName, layer: choice.layer }];
+    var fl = choice.flips || [];
+    for (var f = 0; f < fl.length; f++) {
+      variants.push({ fullName: fl[f].fullName, layer: fl[f].layer });
+    }
+    for (var v = 0; v < variants.length; v++) {
+      var ly = variants[v].layer;
+      if (!ly || isManagedStageLayer(ly)) continue;
+      var vis = false;
       try {
-        ly.enabled = true;
+        vis = !!ly.enabled;
       } catch (e) {}
+      if (vis && indexOfName(out, variants[v].fullName) < 0) {
+        out.push(variants[v].fullName);
+      }
     }
   }
+  var i;
+  for (i = 0; i < node.radioChoices.length; i++) {
+    addStaticVariants(node.radioChoices[i]);
+  }
+  for (i = 0; i < node.optionalChoices.length; i++) {
+    addStaticVariants(node.optionalChoices[i]);
+  }
+  return out;
+}
+
+// この階層の選択肢レイヤー（ラジオ/任意）が表示制御に応答できる状態か保証する。
+// PSD で非表示だったレイヤーは AE 上で目(enabled)が消えて取り込まれ、未登録だと
+// マーカーを切り替えても表示されない。クリック時に登録＋目ONを確実にしておく。
+// 制御ヌル自体が無いグループ（セットアップ未実行）はここで作る。
+// 戻り値: 新規に emo 登録したレイヤー数
+function ensureNodeRegistered(node) {
+  if (!node || !node.ctrlComp) return 0;
+  ensureCtrlLayerForNode(node);
+
+  var toReg = [];
+  var mergeEntries = []; // 登録直前に表示状態だった新規登録レイヤー（マーカー合流用）
+  function collectChoice(choice, kind) {
+    var variants = [{ fullName: choice.fullName, layer: choice.layer }];
+    var fl = choice.flips || [];
+    for (var f = 0; f < fl.length; f++) {
+      variants.push({ fullName: fl[f].fullName, layer: fl[f].layer });
+    }
+    for (var v = 0; v < variants.length; v++) {
+      var ly = variants[v].layer;
+      if (!ly) continue;
+      if (
+        !isRegistered(ly) &&
+        !hasOpacitySignature(ly, LAB_MAP_SIGNATURE) &&
+        !hasOpacitySignature(ly, BLINK_SIGNATURE)
+      ) {
+        var wasVisible = false;
+        try {
+          wasVisible = !!ly.enabled;
+        } catch (eV) {}
+        if (wasVisible) {
+          mergeEntries.push({
+            name: variants[v].fullName,
+            kind: kind,
+            choice: choice,
+          });
+        }
+        toReg.push(ly);
+      } else {
+        // 既に式が付いていても、PSD 由来で目が消えていれば点ける
+        try {
+          ly.enabled = true;
+        } catch (e) {}
+      }
+    }
+  }
+  var i;
+  for (i = 0; i < node.radioChoices.length; i++) {
+    collectChoice(node.radioChoices[i], "radio");
+  }
+  for (i = 0; i < node.optionalChoices.length; i++) {
+    collectChoice(node.optionalChoices[i], "opt");
+  }
+
+  // 静的に表示されていた未登録レイヤーを既存マーカーへ合流（登録の瞬間に消えない）
+  mergeVisibleIntoMarkers(node, mergeEntries);
+
   if (toReg.length > 0) {
-    registerLayers(
+    return registerLayers(
       node.comp,
       node.ctrlComp.name,
       toReg,
       "emo2layer: 立ち絵 自動登録",
     );
   }
+  return 0;
+}
+
+// ══════════════════════════════════════════════════════════════════
+// 口パク/目パチ適用時の自動 emo 登録（グループ単位）
+// ══════════════════════════════════════════════════════════════════
+// 式の登録がクリック時に移ったため、立ち絵タブを経由していないグループへ
+// 口パク/目パチを適用すると、表情連動（emoCtx）とグループ優先サプレスが成立しない。
+// 適用前に対象コンポを「クリックしたのと同じ状態」にする。
+
+// rootComp の参照ツリーに targetComp が含まれるか（コンポ参照の DFS）
+function compTreeContains(rootComp, targetComp) {
+  var seen = {};
+  function walkTree(c) {
+    if (!c || seen[c.id]) return false;
+    seen[c.id] = true;
+    if (c.id === targetComp.id) return true;
+    for (var i = 1; i <= c.numLayers; i++) {
+      var src = null;
+      try {
+        src = c.layer(i).source;
+      } catch (e) {}
+      if (src && src instanceof CompItem && walkTree(src)) return true;
+    }
+    return false;
+  }
+  return walkTree(rootComp);
+}
+
+/**
+ * パーツコンポの制御コンポを解決する（適用時の自動登録用）。
+ *   1) コンポ内の登録済みレイヤーの式から
+ *   2) [Emo] <コンポ名> の制御レイヤーを既に持つコンポ
+ *   3) セットアップ済み（emoSetup タグ）ルートの配下なら、その emoCtrl 指定
+ * 解決できなければ null（自動登録はスキップ＝従来どおり単独式になる）
+ */
+function resolveCtrlCompForApply(comp) {
+  var i;
+  for (i = 1; i <= comp.numLayers; i++) {
+    var ctx = parseEmoContext(comp.layer(i));
+    if (ctx) {
+      var byExpr = findCompByName(ctx.ctrlCompName);
+      if (byExpr) return byExpr;
+    }
+  }
+  var comps = getProjectComps();
+  for (i = 0; i < comps.length; i++) {
+    if (findCtrlLayerInComp(comps[i], comp.name, 0)) return comps[i];
+  }
+  for (i = 0; i < comps.length; i++) {
+    if (!hasSetupTag(comps[i])) continue;
+    if (comps[i].id !== comp.id && !compTreeContains(comps[i], comp)) continue;
+    var tagged = readCtrlCompTag(comps[i]);
+    var taggedComp = tagged ? findCompByName(tagged) : null;
+    return taggedComp || comps[i];
+  }
+  return null;
+}
+
+/**
+ * scanPsdCompTree の group を立ち絵ノード形式へ変換する（このコンポ 1 階層分）。
+ * ensureNodeRegistered を口パク/目パチの適用フローから再利用するため。
+ */
+function buildNodeForComp(comp, ctrlComp) {
+  var groups = scanPsdCompTree(comp);
+  var group = null;
+  for (var g = 0; g < groups.length; g++) {
+    if (groups[g].comp.id === comp.id) {
+      group = groups[g];
+      break;
+    }
+  }
+  if (!group) return null;
+  var radio = [];
+  var optional = [];
+  var i;
+  for (i = 0; i < group.exclusiveLayers.length; i++) {
+    var ex = group.exclusiveLayers[i];
+    radio.push({
+      fullName: ex.layer.name,
+      label: ex.parsed.base,
+      layer: ex.layer,
+      flips: [],
+    });
+  }
+  for (i = 0; i < group.optionalLayers.length; i++) {
+    var op = group.optionalLayers[i];
+    optional.push({
+      fullName: op.layer.name,
+      label: op.parsed.base,
+      layer: op.layer,
+      flips: [],
+    });
+  }
+  // 反転バリエーションを base に束ねる（buildStageNodes と同じペア規則）
+  for (i = 0; i < group.flipVariants.length; i++) {
+    var fv = group.flipVariants[i];
+    if (fv.parsed.forced) continue;
+    var pool = fv.parsed.exclusive ? radio : optional;
+    for (var p = 0; p < pool.length; p++) {
+      if (pool[p].label === fv.parsed.base) {
+        pool[p].flips.push({
+          suffix: flipSuffixOf(fv.parsed),
+          fullName: fv.layer.name,
+          layer: fv.layer,
+        });
+        break;
+      }
+    }
+  }
+  return {
+    comp: comp,
+    ctrlComp: ctrlComp,
+    isRoot: false,
+    radioChoices: radio,
+    optionalChoices: optional,
+    forcedChoices: [],
+  };
+}
+
+/**
+ * 適用対象コンポを、立ち絵タブでクリックしたのと同じ状態（制御レイヤー・
+ * 既定マーカー・グループ全選択肢の emo 登録・静的表示の合流）にする。
+ * 戻り値: 新規登録したレイヤー数（制御が解決できなければ -1 ＝スキップ）
+ */
+function ensureCompRegisteredForApply(comp) {
+  var ctrlComp = resolveCtrlCompForApply(comp);
+  if (!ctrlComp) return -1;
+  var node = buildNodeForComp(comp, ctrlComp);
+  if (!node) return -1;
+  return ensureNodeRegistered(node);
 }

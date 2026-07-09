@@ -718,13 +718,15 @@ function applyStageScroll(value) {
   } catch (e) {}
 }
 
-// 設定済み（[Emo] 制御レイヤーを持つ）コンポだけを列挙する
+// ルート候補 = セットアップ済み（emoSetup タグ）または使用中（[Emo] 制御レイヤーを持つ）コンポだけ。
+// 式の登録はクリック時のため、セットアップ済み判定は comment タグで行う（PSD 以外の手組み立ち絵でも同じように機能する）
 function rebuildStageRootDropdown(selectedName) {
   var comps = getProjectComps();
   stageRootDropdown.removeAll();
   for (var i = 0; i < comps.length; i++) {
-    if (hasCtrlPrefixedLayer(comps[i])) {
-      stageRootDropdown.add("item", comps[i].name);
+    var c = comps[i];
+    if (hasSetupTag(c) || hasCtrlPrefixedLayer(c)) {
+      stageRootDropdown.add("item", c.name);
     }
   }
   if (stageRootDropdown.items.length === 0) return;
@@ -751,6 +753,13 @@ function resolveStageState() {
         break;
       }
     }
+  }
+  if (!stageCtrlComp && rootComp) {
+    // 式が無い（未使用）状態では、セットアップで指定された制御コンポ（comment の emoCtrl タグ）を使う。
+    // 無ければルート自身にフォールバック
+    var taggedName = readCtrlCompTag(rootComp);
+    var taggedComp = taggedName ? findCompByName(taggedName) : null;
+    stageCtrlComp = taggedComp || rootComp;
   }
   if (!stageCtrlComp) stageCtrlComp = rootComp;
 
@@ -793,9 +802,14 @@ function resolveStageState() {
     } else {
       nd.ctrlComp = stageCtrlComp;
     }
-    nd.visibleSet = nd.ctrlComp
-      ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
-      : [];
+    // 未登録（式なし）で目が点いているレイヤーはマーカーに関係なく見えているため、
+    // チェック表示が見た目と一致するよう合成する
+    nd.visibleSet = augmentVisibleSetWithStatic(
+      nd,
+      nd.ctrlComp
+        ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
+        : [],
+    );
   }
   computeStageActive(stageNodes);
 }
@@ -807,9 +821,12 @@ function resolveStageState() {
 function resolveStageVisibleState() {
   for (var i = 0; i < stageNodes.length; i++) {
     var nd = stageNodes[i];
-    nd.visibleSet = nd.ctrlComp
-      ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
-      : [];
+    nd.visibleSet = augmentVisibleSetWithStatic(
+      nd,
+      nd.ctrlComp
+        ? readVisibleSet(nd.ctrlComp, nd.comp.name, nd.ctrlComp.time)
+        : [],
+    );
   }
   computeStageActive(stageNodes);
 }

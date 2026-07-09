@@ -248,6 +248,209 @@ describe("bakeAll / unbakeAll / 再適用の後片付け", function () {
   });
 });
 
+describe("ベイク中リネームの修復", function () {
+  // AE はベイク（式無効化）中の式テキストを自動リネームしないため、
+  // 再ベイク／ベイク解除時に実在しない comp("名前") 参照を実物から補正する
+
+  function makeStaleEmoBaked(ctrlCompNewName) {
+    // 「旧制御」名で焼き込まれた式を持つベイク済みレイヤーと、
+    // リネーム後の制御コンポ（[Emo] 顔 を実際に持つ）を用意する
+    var ctrlComp = h.makeComp(ctrlCompNewName, [
+      h.makeLayer("[Emo] 顔", { markers: [{ time: 1, comment: "口あ" }] }),
+    ], 10);
+    var ly = h.makeLayer("口あ", {
+      expression: sandbox.buildOpacityExpression("旧制御", "顔"),
+    });
+    ly.transform.opacity.expressionEnabled = false; // ベイク状態
+    ly.transform.opacity.setValuesAtTimes([0], [0]);
+    var faceComp = h.makeComp("顔", [ly], 10);
+    return { ctrlComp: ctrlComp, ly: ly, faceComp: faceComp };
+  }
+
+  it("ベイク解除時に制御コンポ参照を実物から補正する", function () {
+    var s = makeStaleEmoBaked("新制御A");
+    h.registerComps(sandbox, [s.ctrlComp, s.faceComp]);
+
+    var rep = sandbox.unbakeAllExpressions();
+    assert.equal(rep.restored, 1);
+    assert.equal(h.plain(sandbox.parseEmoContext(s.ly)).ctrlCompName, "新制御A");
+    var evalFn = h.makeExprEvaluator(
+      s.ly.transform.opacity.expression,
+      { 新制御A: s.ctrlComp },
+      "口あ",
+    );
+    assert.equal(evalFn(2), 100, "補正後の式が正しく評価される");
+  });
+
+  it("再ベイク時にも補正され、スキップにならない", function () {
+    var s = makeStaleEmoBaked("新制御B");
+    h.registerComps(sandbox, [s.ctrlComp, s.faceComp]);
+
+    var rep = sandbox.bakeAllExpressions();
+    assert.equal(rep.emo, 1, "スキップせずベイクされる");
+    assert.equal(rep.skipped, 0);
+    var evalFn = h.makeExprEvaluator(
+      s.ly.transform.opacity.expression,
+      { 新制御B: s.ctrlComp },
+      "口あ",
+    );
+    for (var t = 0; t <= 10; t += 0.05) {
+      assert.equal(h.steppedValue(s.ly.transform.opacity, t), evalFn(t), "t=" + t);
+    }
+  });
+
+  it("目パチ合成式（表情連動）の制御コンポ参照も補正される", function () {
+    var ctrlComp = h.makeComp("新制御G", [
+      h.makeLayer("[Emo] 顔", {
+        markers: [
+          { time: 0, comment: "目開き" },
+          { time: 5, comment: "目笑い" },
+        ],
+      }),
+    ], 10);
+    var ly = h.makeLayer("目開き", {
+      expression: sandbox.buildBlinkExpression(
+        { interval: 1.0, speed: 0.07, hold: 0.035, jitter: 0.4 },
+        "open",
+        true,
+        "目開き",
+        { ctrlCompName: "旧制御", targetCompName: "顔" },
+      ),
+    });
+    ly.transform.opacity.expressionEnabled = false; // ベイク状態
+    ly.transform.opacity.setValuesAtTimes([0], [0]);
+    var eyeComp = h.makeComp("目コンポG", [ly], 10);
+    h.registerComps(sandbox, [ctrlComp, eyeComp]);
+
+    var rep = sandbox.bakeAllExpressions();
+    assert.equal(rep.blink, 1, "スキップされずベイクされる");
+    assert.equal(h.plain(sandbox.parseEmoContext(ly)).ctrlCompName, "新制御G");
+    // 補正後の式とベイク結果が全域一致（表情連動の切替も含めて正しい）
+    var evalFn = h.makeExprEvaluator(
+      ly.transform.opacity.expression,
+      { 新制御G: ctrlComp },
+      "目開き",
+    );
+    for (var t = 0; t <= 10; t += 0.037) {
+      assert.equal(h.steppedValue(ly.transform.opacity, t), evalFn(t), "t=" + t);
+    }
+  });
+
+  it("複数立ち絵×複数の制御先でも、それぞれ自分の制御コンポへ補正される", function () {
+    // 旧名が同じ「旧制御」でも、ターゲット名（[Emo] レイヤーの実物）で
+    // 独立に解決されるため、2 系統が混ざらない
+    var ctrlA = h.makeComp("新シーンA", [
+      h.makeLayer("[Emo] ゆかり_口", { markers: [{ time: 1, comment: "口あ" }] }),
+    ], 10);
+    var ctrlB = h.makeComp("新シーンB", [
+      h.makeLayer("[Emo] あかり_口", { markers: [{ time: 1, comment: "口あ" }] }),
+    ], 10);
+    function staleLayer(target) {
+      var ly = h.makeLayer("口あ", {
+        expression: sandbox.buildOpacityExpression("旧制御", target),
+      });
+      ly.transform.opacity.expressionEnabled = false;
+      ly.transform.opacity.setValuesAtTimes([0], [0]);
+      return ly;
+    }
+    var lyA = staleLayer("ゆかり_口");
+    var lyB = staleLayer("あかり_口");
+    var compA = h.makeComp("ゆかり_口", [lyA], 10);
+    var compB = h.makeComp("あかり_口", [lyB], 10);
+    h.registerComps(sandbox, [ctrlA, ctrlB, compA, compB]);
+
+    sandbox.__promptCompCalls.length = 0;
+    var rep = sandbox.bakeAllExpressions();
+
+    assert.equal(rep.emo, 2, "両方ベイクされる");
+    assert.equal(sandbox.__promptCompCalls.length, 0, "候補1件ずつなのでダイアログ不要");
+    assert.equal(h.plain(sandbox.parseEmoContext(lyA)).ctrlCompName, "新シーンA");
+    assert.equal(h.plain(sandbox.parseEmoContext(lyB)).ctrlCompName, "新シーンB");
+  });
+
+  it("候補が複数なら選択ダイアログで決める（同じ名前は 1 回だけ聞く）", function () {
+    // [Lab] を持つコンポが 2 つ → 曖昧 → ダイアログの選択結果で補正
+    var labA = h.makeLayer("[Lab] vA", {
+      inPoint: 0,
+      outPoint: 8,
+      markers: [{ time: 1, comment: "a" }],
+    });
+    var tlA = h.makeComp("タイムラインA", [labA], 10);
+    var labB = h.makeLayer("[Lab] vB", {
+      inPoint: 0,
+      outPoint: 8,
+      markers: [{ time: 1, comment: "o" }],
+    });
+    var tlB = h.makeComp("タイムラインB", [labB], 10);
+    function staleMouth(name) {
+      var ly = h.makeLayer(name, {
+        expression: sandbox.buildLabMappedExpression("旧TL", "a", "a,i,u,e,o,N", false, null, ""),
+      });
+      ly.transform.opacity.expressionEnabled = false;
+      ly.transform.opacity.setValuesAtTimes([0], [0]);
+      return ly;
+    }
+    var ly1 = staleMouth("口あ");
+    var ly2 = staleMouth("口い");
+    var mouthComp = h.makeComp("口コンポD", [ly1, ly2], 10);
+    h.registerComps(sandbox, [tlA, tlB, mouthComp]);
+
+    sandbox.__promptCompCalls.length = 0;
+    sandbox.__promptCompResult = "タイムラインB"; // ユーザーが B を選択
+    var rep = sandbox.bakeAllExpressions();
+
+    assert.equal(rep.lab, 2);
+    assert.equal(sandbox.__promptCompCalls.length, 1, "同じ旧名は 1 回しか聞かない");
+    assert.deepEqual(h.plain(sandbox.__promptCompCalls[0].compNames), ["タイムラインA", "タイムラインB"]);
+    assert.equal(h.plain(sandbox.parseLabMapContext(ly1)).phonemeCompName, "タイムラインB");
+    assert.equal(h.plain(sandbox.parseLabMapContext(ly2)).phonemeCompName, "タイムラインB");
+  });
+
+  it("選択をキャンセルしたら補正せずスキップする", function () {
+    var labA = h.makeLayer("[Lab] vA", { markers: [{ time: 1, comment: "a" }] });
+    var tlA = h.makeComp("タイムラインE1", [labA], 10);
+    var labB = h.makeLayer("[Lab] vB", { markers: [{ time: 1, comment: "o" }] });
+    var tlB = h.makeComp("タイムラインE2", [labB], 10);
+    var ly = h.makeLayer("口あ", {
+      expression: sandbox.buildLabMappedExpression("旧TL", "a", "a,i,u,e,o,N", false, null, ""),
+    });
+    ly.transform.opacity.expressionEnabled = false;
+    ly.transform.opacity.setValuesAtTimes([0], [0]);
+    var mouthComp = h.makeComp("口コンポE", [ly], 10);
+    h.registerComps(sandbox, [tlA, tlB, mouthComp]);
+
+    sandbox.__promptCompCalls.length = 0;
+    sandbox.__promptCompResult = null; // キャンセル
+    var rep = sandbox.bakeAllExpressions();
+
+    assert.equal(rep.skipped, 1, "補正できないのでスキップ扱い");
+    assert.equal(h.plain(sandbox.parseLabMapContext(ly)).phonemeCompName, "旧TL", "式は触らない");
+  });
+
+  it("口パクの音素コンポ参照も [Lab] コンポが 1 つだけなら補正する", function () {
+    var lab = h.makeLayer("[Lab] v", {
+      inPoint: 0,
+      outPoint: 8,
+      markers: [{ time: 1, comment: "a" }],
+    });
+    var timeline = h.makeComp("新タイムラインC", [lab], 10);
+    var ly = h.makeLayer("口あ", {
+      expression: sandbox.buildLabMappedExpression("旧TL", "a", "a,i,u,e,o,N", false, null, ""),
+    });
+    ly.transform.opacity.expressionEnabled = false;
+    ly.transform.opacity.setValuesAtTimes([0], [0]);
+    var mouthComp = h.makeComp("口コンポC", [ly], 10);
+    h.registerComps(sandbox, [timeline, mouthComp]);
+
+    var rep = sandbox.bakeAllExpressions();
+    assert.equal(rep.lab, 1);
+    assert.equal(
+      h.plain(sandbox.parseLabMapContext(ly)).phonemeCompName,
+      "新タイムラインC",
+    );
+  });
+});
+
 describe("式パラメータの逆パーサ", function () {
   var emoCtx = { ctrlCompName: '制"御\\', targetCompName: "顔" };
 

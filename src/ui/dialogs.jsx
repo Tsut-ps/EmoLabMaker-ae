@@ -29,6 +29,35 @@ function promptForSetName(defaultName) {
  * compNames を渡せばその候補だけ（検証済み）から選ばせる。
  * 確定したらコンポ名、キャンセルなら null を返す。
  */
+/**
+ * 汎用のコンポ選択ダイアログ。message を説明文として candidates から 1 つ選ばせる。
+ * ベイク中リネームの参照補正で候補が複数あるときに使う（キャンセルなら null）。
+ */
+function promptCompSelection(message, compNames, defaultName) {
+  var dialog = new Window("dialog", "コンポジションを選択");
+  dialog.orientation = "column";
+  dialog.alignChildren = ["fill", "top"];
+
+  dialog.add("statictext", undefined, message);
+  var compDropdown = dialog.add("dropdownlist", undefined, compNames);
+  for (var j = 0; j < compNames.length; j++) {
+    if (compNames[j] === defaultName) {
+      compDropdown.selection = j;
+      break;
+    }
+  }
+  if (!compDropdown.selection && compNames.length > 0) {
+    compDropdown.selection = 0;
+  }
+
+  var btnGroup = dialog.add("group");
+  btnGroup.add("button", undefined, "OK", { name: "ok" });
+  btnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
+
+  if (dialog.show() !== 1) return null;
+  return compDropdown.selection ? compDropdown.selection.text : null;
+}
+
 function promptForPhonemeComp(defaultName, compNames) {
   if (!compNames) {
     compNames = [];
@@ -127,8 +156,10 @@ function pickMouthLayerDialog(rowLabel, candidateLayers) {
 
 /**
  * 走査結果の確認ダイアログ。
- * セットアップするグループを選ばせる（誤検出の確認画面を兼ねる）。
- * OK なら選択されたグループ配列、キャンセルなら null を返す
+ * 解析結果の確認ダイアログ（誤検出の確認画面。グループの取捨選択は廃止）。
+ * 名前の正規化は常に全グループへ行い、「一部だけリネーム済み」という
+ * マーカー不整合の温床を作らない。式の登録は立ち絵タブで使ったとき。
+ * 実行するなら true / キャンセルなら false を返す
  */
 function showPsdScanDialog(rootComp, groups) {
   var dialog = new Window("dialog", "PSD 解析結果 - " + rootComp.name);
@@ -140,7 +171,7 @@ function showPsdScanDialog(rootComp, groups) {
   dialog.add(
     "statictext",
     undefined,
-    "セットアップするグループを選択してください:",
+    "次のグループを検出しました（" + groups.length + " 件）:",
   );
 
   var listGroup = dialog.add("group");
@@ -148,7 +179,6 @@ function showPsdScanDialog(rootComp, groups) {
   listGroup.alignChildren = ["fill", "top"];
   listGroup.spacing = 2;
 
-  var checkboxes = [];
   for (var i = 0; i < groups.length; i++) {
     var group = groups[i];
     var defaultLayer = group.defaultLayer;
@@ -167,36 +197,28 @@ function showPsdScanDialog(rootComp, groups) {
         ? " / 既定: " + parsePsdLayerName(defaultLayer.name).base
         : "") +
       "）";
-    var cb = listGroup.add("checkbox", undefined, label);
-    // 排他または任意指定があるグループを既定で ON（強制のみのグループも選択は可能）
-    cb.value =
-      group.exclusiveLayers.length > 0 || group.optionalLayers.length > 0;
-    checkboxes.push(cb);
+    listGroup.add("statictext", undefined, label);
   }
 
-  var noteText = dialog.add(
-    "statictext",
-    undefined,
+  var notes = [
     "グループコンポは「" + rootComp.name + "_◯◯」に改名されます",
-  );
-  noteText.graphics.foregroundColor = noteText.graphics.newPen(
-    noteText.graphics.PenType.SOLID_COLOR,
-    [0.6, 0.6, 0.6, 1],
-    1,
-  );
+    "式の登録は立ち絵タブで使ったときに行われます（使用中のグループは更新）",
+  ];
+  for (var n = 0; n < notes.length; n++) {
+    var noteText = dialog.add("statictext", undefined, notes[n]);
+    noteText.graphics.foregroundColor = noteText.graphics.newPen(
+      noteText.graphics.PenType.SOLID_COLOR,
+      [0.6, 0.6, 0.6, 1],
+      1,
+    );
+  }
 
   var btnGroup = dialog.add("group");
   btnGroup.alignment = ["right", "bottom"];
   btnGroup.add("button", undefined, "セットアップ", { name: "ok" });
   btnGroup.add("button", undefined, "キャンセル", { name: "cancel" });
 
-  if (dialog.show() !== 1) return null;
-
-  var selected = [];
-  for (var j = 0; j < groups.length; j++) {
-    if (checkboxes[j].value) selected.push(groups[j]);
-  }
-  return selected;
+  return dialog.show() === 1;
 }
 
 /** セットアップ結果のレポートダイアログ */
@@ -208,10 +230,18 @@ function showPsdReportDialog(report) {
   dialog.spacing = 6;
 
   var summaryLines = [
-    "グループ: " + report.groupCount,
+    "更新したグループ: " + report.groupCount,
     "新規登録: " + report.registered + " レイヤー",
     "更新: " + report.updated + " レイヤー",
   ];
+  if (report.passed > 0) {
+    summaryLines.push(
+      "未使用（登録は立ち絵タブで使用時）: " + report.passed + " グループ",
+    );
+  }
+  if (report.ctrlMigrated > 0) {
+    summaryLines.push("制御コンポへ移行: " + report.ctrlMigrated + " レイヤー");
+  }
   if (report.kept > 0) {
     summaryLines.push(
       "保持（口パク/目パチ設定済み）: " + report.kept + " レイヤー",

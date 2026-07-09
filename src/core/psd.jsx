@@ -87,6 +87,59 @@ function flipHasY(state) {
   return state === "flipy" || state === "flipxy";
 }
 
+// ── セットアップ済みタグ ────────────────────────────────────────
+// セットアップ実行済みのルートコンポは comment に "emoSetup" を記録する。
+// 立ち絵タブのルート候補は「セットアップ済み or 制御レイヤーあり」だけを列挙する
+// （式の登録はクリック時のため、制御レイヤーの有無ではセットアップ済みを判定できない。
+//   comment タグなら PSD 以外の手組み立ち絵でも同じように機能する）
+
+function hasSetupTag(comp) {
+  try {
+    return String(comp.comment || "").indexOf("emoSetup") >= 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+function writeSetupTag(comp) {
+  try {
+    var c = String(comp.comment || "");
+    if (c.indexOf("emoSetup") >= 0) return;
+    comp.comment = (c ? c + " " : "") + "emoSetup";
+  } catch (e) {}
+}
+
+// ── 制御コンポ指定タグ ──────────────────────────────────────────
+// セットアップの「制御」ドロップダウンの指定をルートコンポの comment に記録する。
+// 式の登録はクリック時のため、立ち絵タブが制御レイヤーを作る場所
+// （ensureCtrlLayerForNode の node.ctrlComp）はこの指定から解決する。
+// コンポ名は空白を含み得るため「1 行 1 タグ」の行形式（emoCtrl=<名前>）で保持する
+
+function readCtrlCompTag(comp) {
+  try {
+    var lines = String(comp.comment || "").split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf("emoCtrl=") === 0) {
+        return lines[i].substring("emoCtrl=".length);
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
+function writeCtrlCompTag(comp, ctrlCompName) {
+  try {
+    var lines = String(comp.comment || "").split(/\r?\n/);
+    var out = [];
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf("emoCtrl=") === 0) continue; // 旧指定を除去
+      if (lines[i] !== "") out.push(lines[i]);
+    }
+    out.push("emoCtrl=" + ctrlCompName);
+    comp.comment = out.join("\n");
+  } catch (e) {}
+}
+
 // 反転状態はルートコンポの comment に "emoFlip:flipx" 等として記録する（冪等）。
 function readFlipState(comp) {
   if (!comp) return "";
@@ -179,6 +232,15 @@ function scanPsdCompTree(rootComp) {
 
     for (var i = 1; i <= comp.numLayers; i++) {
       var layer = comp.layer(i);
+      // システムレイヤー（[Emo]/[EmoSet]/[Lab]）とヌルは選択肢ではない
+      // （ルート＝制御コンポ運用で制御ヌルが任意指定として登録されるのを防ぐ）
+      if (isSystemLayerName(layer.name)) continue;
+      var isNull = false;
+      try {
+        isNull = layer.nullLayer === true;
+      } catch (eNull) {}
+      if (isNull) continue;
+
       var parsed = parseScanName(layer.name);
 
       var source = null;
@@ -271,40 +333,233 @@ function uniquifyGroupCompName(rootComp, groupComp) {
   return oldName + " → " + unique;
 }
 
+// 「表示中集合」（カンマ区切り）内の oldName トークンだけを newName に置換する。
+// 変更が無ければ null（式の membership 判定と同じ「完全一致」で置換する）
+function replaceSetToken(setStr, oldName, newName) {
+  var parts = String(setStr).split(",");
+  var changed = false;
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i] === oldName) {
+      parts[i] = newName;
+      changed = true;
+    }
+  }
+  return changed ? parts.join(",") : null;
+}
+
 /**
- * グループコンポを oldName → newName にリネームした際、参照を移行する。
- *   1) 制御コンポ内の制御レイヤー [Emo] oldName を [Emo] newName にリネーム
- *      （マーカー＝表情/口形の選択履歴を保持したまま新名へ引き継ぐ）
- *   2) このコンポ内レイヤーの式に焼き込まれた旧コンポ名参照を新名へ置換
- *      （登録済み emo はこの後 registerLayers で作り直されるが、保持される
- *        口パク/目パチの合成式は作り直されないため、ここで直す必要がある）
+ * コンポリネームに伴うマーカー・表情セットの移行（プロジェクト全体）。
+ * AE ではコンポをリネームすると、それを参照する親コンポ内のレイヤー名も
+ * 自動で追従変更される。マーカー（表示中集合）と [EmoSet] はレイヤー名を
+ * 文字列で保持しているため、追従しない参照をここで新名へ置換する。
+ * 制御レイヤーは立ち絵タブ経由で別コンポに作られていることもあるため、
+ * セットアップで選んだ制御コンポに限定せず全コンポを走査する。
  */
-function migrateGroupRename(comp, ctrlComp, oldName, newName) {
-  if (!comp || !ctrlComp || oldName === newName) return;
+function migrateNameInMarkersAndSets(oldName, newName) {
   var oldCtrl = getCtrlLayerName(oldName);
   var newCtrl = getCtrlLayerName(newName);
-  try {
-    for (var i = 1; i <= ctrlComp.numLayers; i++) {
-      var cl = ctrlComp.layer(i);
-      if (cl.name === oldCtrl) cl.name = newCtrl; // マーカー保持のままリネーム
+  var comps = getProjectComps();
+  for (var c = 0; c < comps.length; c++) {
+    var cc = comps[c];
+    for (var i = 1; i <= cc.numLayers; i++) {
+      var ly = cc.layer(i);
+      var nm = ly.name;
+      if (nm === oldCtrl) {
+        // 制御レイヤー自体のリネーム（マーカー＝選択履歴を保持したまま引き継ぐ）
+        try {
+          ly.name = newCtrl;
+        } catch (eN) {}
+        nm = newCtrl;
+      }
+      if (nm.indexOf(CTRL_PREFIX) === 0) {
+        // 制御レイヤーのマーカー集合内の旧レイヤー名トークンを置換
+        try {
+          var marker = ly.property("Marker");
+          for (var k = 1; k <= marker.numKeys; k++) {
+            var replaced = replaceSetToken(
+              marker.keyValue(k).comment,
+              oldName,
+              newName,
+            );
+            if (replaced !== null) {
+              marker.setValueAtTime(marker.keyTime(k), new MarkerValue(replaced));
+            }
+          }
+        } catch (eM) {}
+      } else if (nm.indexOf(SET_PREFIX) === 0) {
+        // 表情セット: コメントの「<対象コンポ名>=<集合>」の両側を置換
+        try {
+          var lines = String(ly.comment || "").split(/\r?\n/);
+          var changed = false;
+          for (var L = 0; L < lines.length; L++) {
+            var eq = lines[L].indexOf("=");
+            if (eq <= 0) continue;
+            var target = lines[L].substring(0, eq);
+            var setPart = lines[L].substring(eq + 1);
+            if (target === oldName) {
+              target = newName;
+              changed = true;
+            }
+            var newSet = replaceSetToken(setPart, oldName, newName);
+            if (newSet !== null) {
+              setPart = newSet;
+              changed = true;
+            }
+            lines[L] = target + "=" + setPart;
+          }
+          if (changed) ly.comment = lines.join("\n");
+        } catch (eS) {}
+      }
     }
-  } catch (e) {}
-  var oldEsc = escapeExprStr(oldName);
-  var newEsc = escapeExprStr(newName);
+  }
+}
+
+/**
+ * コンポ内レイヤーの不透明度式に焼き込まれた oldName 参照を newName へ置換する。
+ * 置換は「comp("旧名")」と「制御レイヤー名リテラル "[Emo] 旧名"」の 2 形式に限定する
+ * （裸の文字列置換だと、目パチ式の openNames 等に入っているレイヤー名リテラルが、旧名を部分文字列として含む場合に巻き添えで壊れるため）。
+ * ベイク済み（式無効化）レイヤーの状態を変えないよう expressionEnabled を保つ。
+ */
+function replaceCompNameInCompExpressions(comp, oldName, newName) {
+  if (!comp || oldName === newName) return;
+  var pairs = [
+    ['comp("' + escapeExprStr(oldName) + '")', 'comp("' + escapeExprStr(newName) + '")'],
+    [
+      '"' + escapeExprStr(getCtrlLayerName(oldName)) + '"',
+      '"' + escapeExprStr(getCtrlLayerName(newName)) + '"',
+    ],
+  ];
   for (var j = 1; j <= comp.numLayers; j++) {
     var ly = comp.layer(j);
+    var prop;
     var ex;
     try {
-      ex = ly.transform.opacity.expression;
+      prop = ly.transform.opacity;
+      ex = prop.expression;
     } catch (e2) {
       continue;
     }
-    if (ex && ex.indexOf(oldEsc) >= 0) {
+    if (!ex) continue;
+    var replaced = ex;
+    for (var p = 0; p < pairs.length; p++) {
+      if (replaced.indexOf(pairs[p][0]) >= 0) {
+        replaced = replaced.split(pairs[p][0]).join(pairs[p][1]);
+      }
+    }
+    if (replaced !== ex) {
       try {
-        ly.transform.opacity.expression = ex.split(oldEsc).join(newEsc);
+        var wasEnabled = prop.expressionEnabled;
+        prop.expression = replaced;
+        prop.expressionEnabled = wasEnabled;
       } catch (e3) {}
     }
   }
+}
+
+/**
+ * グループコンポを oldName → newName にリネームした際、参照を移行する。
+ *   1) 制御レイヤー [Emo] oldName → [Emo] newName
+ *      （プロジェクト全体。マーカー＝表情/口形の選択履歴を保持したまま新名へ引き継ぐ）
+ *   2) 全制御レイヤーのマーカー集合・[EmoSet] 内の旧名トークンを新名へ置換
+ *      （親コンポのフォルダレイヤー名はソース名に追従して変わるため）
+ *   3) このコンポ内レイヤーの式に焼き込まれた旧コンポ名参照を新名へ置換
+ *      （登録済み emo はこの後 registerLayers で作り直されるが、保持される
+ *        口パク/目パチの合成式は作り直されないため、ここで直す必要がある）
+ */
+function migrateGroupRename(comp, oldName, newName) {
+  if (!comp || oldName === newName) return;
+  migrateNameInMarkersAndSets(oldName, newName);
+  replaceCompNameInCompExpressions(comp, oldName, newName);
+}
+
+// ── 制御コンポの移行（引っ越し） ────────────────────────────────
+// セットアップで以前と異なる制御コンポを指定したとき、
+// 既存の制御レイヤーをマーカーごと新しい制御コンポへ移動し、式の参照も付け替える。
+
+/** 選択した制御コンポ以外に居る各グループの制御レイヤーを列挙する */
+function collectForeignCtrlLayers(ctrlComp, groups) {
+  var out = [];
+  var comps = getProjectComps();
+  for (var g = 0; g < groups.length; g++) {
+    var name = groups[g].comp.name;
+    if (findCtrlLayerInComp(ctrlComp, name, 0)) continue; // 既に新側に居る
+    for (var c = 0; c < comps.length; c++) {
+      if (comps[c].id === ctrlComp.id) continue;
+      var ly = findCtrlLayerInComp(comps[c], name, 0);
+      if (ly) {
+        out.push({ group: groups[g], fromComp: comps[c], layer: ly });
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * コンポ内レイヤーの式の「制御コンポ参照」だけを oldName → newName に置換する。
+ * 旧制御コンポが音素コンポを兼ねている場合、comp("旧名") の裸置換だと、口パク合成式の音素参照まで巻き添えで
+ * 書き換えてしまうため、制御参照の行形式（var ctrlComp = ...）に限定する。
+ */
+function replaceCtrlCompRefInCompExpressions(comp, oldName, newName) {
+  if (!comp || oldName === newName) return;
+  var oldRef = 'var ctrlComp = comp("' + escapeExprStr(oldName) + '");';
+  var newRef = 'var ctrlComp = comp("' + escapeExprStr(newName) + '");';
+  for (var j = 1; j <= comp.numLayers; j++) {
+    var ly = comp.layer(j);
+    var prop;
+    var ex;
+    try {
+      prop = ly.transform.opacity;
+      ex = prop.expression;
+    } catch (e2) {
+      continue;
+    }
+    if (ex && ex.indexOf(oldRef) >= 0) {
+      try {
+        var wasEnabled = prop.expressionEnabled;
+        prop.expression = ex.split(oldRef).join(newRef);
+        prop.expressionEnabled = wasEnabled;
+      } catch (e3) {}
+    }
+  }
+}
+
+/**
+ * 制御レイヤーを（マーカーごと）ctrlComp へ移動し、移動元コンポ名を参照する
+ * 式を新コンポ名へ置換する。表情式はこの後の再登録でも作り直されるが、保持される口パク/目パチの合成式は置換が必須。
+ * 戻り値: 移動数
+ *
+ * ※ copyToComp は使わない。挿入位置が環境依存で「最上位＝コピー」の仮定が成り立たず、
+ *   無関係なレイヤーを hideCtrlLayer してその source コンポをリネームしてしまった（実機検証）。
+ *   正規の作成手順（createCtrlLayer＝命名・不可視化・整列）で新しいヌルを作り、マーカーだけ移す。
+ *   移したマーカーはコメント（表示中集合）のみ＝本ツールの管理対象と同じ。
+ */
+function migrateCtrlLayersTo(foreign, ctrlComp) {
+  var moved = 0;
+  var prevMoved = null; // 移行した制御ヌルを作成順に整列する（交互配置の防止）
+  for (var i = 0; i < foreign.length; i++) {
+    var f = foreign[i];
+    try {
+      var newCtrl = createCtrlLayer(ctrlComp, f.group.comp.name, prevMoved);
+      var oldMarker = f.layer.property("Marker");
+      var newMarker = newCtrl.property("Marker");
+      for (var k = 1; k <= oldMarker.numKeys; k++) {
+        newMarker.setValueAtTime(
+          oldMarker.keyTime(k),
+          new MarkerValue(oldMarker.keyValue(k).comment),
+        );
+      }
+      f.layer.remove();
+      prevMoved = newCtrl;
+      moved++;
+    } catch (e) {
+      continue;
+    }
+    // 制御コンポ名を参照する式は対象グループ内に居る（emo 登録式＋合成式）。
+    // 音素コンポが旧制御と同一のことがあるため、制御参照の行だけを置換する
+    replaceCtrlCompRefInCompExpressions(f.group.comp, f.fromComp.name, ctrlComp.name);
+  }
+  return moved;
 }
 
 /**
@@ -345,9 +600,15 @@ function hasOpacitySignature(layer, signature) {
 }
 
 /**
- * 走査結果に基づいてセットアップ / 更新を実行する。
+ * 走査結果に基づいてセットアップ / 更新を実行する（全グループ・選択なし）。
+ * 役割分担: セットアップ＝名前の正規化（全件）＋使用中グループの式更新。
+ *           式の登録・制御レイヤー作成＝立ち絵タブのクリック時
+ *           （ensureCtrlLayerForNode）。制御レイヤーが無いグループはパスする。
+ * 名前は常に全件を一括で正規化するため「一部だけリネーム済み」という状態が生まれず、
+ * リネーム順序に起因するマーカー不整合が構造的に起きない
+ * （リネーム時のマーカー等の移行は migrateGroupRename が行う）。
  * 冪等性ルール:
- *   - リネーム（* 剥がし / 一意化）は適用済みなら何もしない
+ *   - リネーム（一意化）は適用済みなら何もしない
  *   - 口パク等の合成式が設定済みのレイヤーは上書きせず保持
  *   - 時刻 0 のデフォルト表情マーカーは、制御レイヤーにマーカーが
  *     1 つもないときだけ書き込む（既存式はマーカーなし時 opacity 0 のため
@@ -356,6 +617,8 @@ function hasOpacitySignature(layer, signature) {
 function autoSetupPsd(rootComp, ctrlComp, groups) {
   var report = {
     groupCount: 0,
+    passed: 0, // 未使用（制御レイヤー無し）＝名前の正規化のみ行ったグループ
+    ctrlMigrated: 0, // 制御コンポの移行（引っ越し）で移動した制御レイヤー数
     registered: 0,
     updated: 0,
     kept: 0,
@@ -370,6 +633,35 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
 
   beginUndo("EmoLabMaker: PSDセットアップ");
   try {
+    // 制御コンポの移行: 選択と異なる場所に既存の制御レイヤーがあれば、
+    // 確認のうえマーカーごと移動し、式の参照も新コンポ名へ置換する
+    var foreign = collectForeignCtrlLayers(ctrlComp, groups);
+    if (foreign.length > 0) {
+      var fromNames = [];
+      var fromSeen = {};
+      for (var fn = 0; fn < foreign.length; fn++) {
+        if (!fromSeen[foreign[fn].fromComp.id]) {
+          fromSeen[foreign[fn].fromComp.id] = true;
+          fromNames.push(foreign[fn].fromComp.name);
+        }
+      }
+      var doMigrate = confirm(
+        "既存の制御レイヤー " +
+          foreign.length +
+          " 件が別のコンポ（" +
+          fromNames.join(", ") +
+          "）にあります。\n「" +
+          ctrlComp.name +
+          "」へ移行しますか？\n（いいえ: 現在の場所のまま使い続けます）",
+      );
+      if (doMigrate) {
+        report.ctrlMigrated = migrateCtrlLayersTo(foreign, ctrlComp);
+      }
+    }
+
+    // セットアップ済みタグ（立ち絵タブのルート候補に載せる）＋制御コンポの指定
+    writeSetupTag(rootComp);
+    writeCtrlCompTag(rootComp, ctrlComp.name);
     var prevCtrlNull = null; // この実行で直前に作った制御ヌル（作成順を保つ）
     for (var g = 0; g < groups.length; g++) {
       var group = groups[g];
@@ -379,9 +671,9 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
       var compRename = uniquifyGroupCompName(rootComp, comp);
       if (compRename) {
         report.renamedComps.push(compRename);
-        // リネームで参照が壊れないよう、制御レイヤー名とこのコンポ内の式の
-        // 旧コンポ名参照を新名へ移行する（口パク/目パチの保持式・マーカーを守る）
-        migrateGroupRename(comp, ctrlComp, oldCompName, comp.name);
+        // リネームで参照が壊れないよう、制御レイヤー名・マーカー・表情セット・
+        // このコンポ内の式の旧コンポ名参照を新名へ移行する
+        migrateGroupRename(comp, oldCompName, comp.name);
       }
 
       // プレフィックス（* / !）は剥がさず保持する（種別を名前から判別できるように）。
@@ -401,6 +693,23 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
           }
         } catch (err) {}
         report.forced++;
+      }
+
+      // 強制(!)の反転バリエーションは登録対象外（マーカーで管理されない）。
+      // base と両方表示されないよう「base 表示 / flip 非表示」に正規化する
+      // （反転ボタンは登録ペアのみ対象＝強制ペアの反転切替は未対応の既知制限）
+      for (var ff = 0; ff < group.flipVariants.length; ff++) {
+        var ffv = group.flipVariants[ff];
+        if (!ffv.parsed.forced) continue;
+        var ffBaseName = ffv.layer.name.replace(/:(flipxy|flipx|flipy)$/, "");
+        for (var fb = 0; fb < group.forcedLayers.length; fb++) {
+          if (group.forcedLayers[fb].name === ffBaseName) {
+            try {
+              ffv.layer.enabled = false;
+            } catch (eFF) {}
+            break;
+          }
+        }
       }
 
       // レイヤー名にカンマがあると「表示中集合」（カンマ区切り）が壊れるため警告する
@@ -438,25 +747,54 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
         var fv = group.flipVariants[s];
         var fvKey = fv.parsed.base + "|" + (fv.parsed.exclusive ? "EX" : "OPT");
         var paired = !fv.parsed.forced && baseKeys[fvKey] === true;
-        report.flipVariants.push(
-          comp.name +
-            ": " +
-            fv.layer.name +
-            (paired ? "（ペア登録）" : "（ペアなし→スキップ）"),
-        );
+        var fvNote;
+        if (paired) {
+          fvNote = "（ペア登録）";
+        } else if (fv.parsed.forced) {
+          fvNote = "（強制 → base 表示 / flip 非表示）";
+        } else {
+          fvNote = "（ペアなし→スキップ）";
+        }
+        report.flipVariants.push(comp.name + ": " + fv.layer.name + fvNote);
         if (paired) pairedFlipLayers.push(fv.layer);
       }
 
-      // 排他も任意指定もないグループには制御レイヤーを作らない
-      if (
-        group.exclusiveLayers.length === 0 &&
-        group.optionalLayers.length === 0
-      ) {
+      // ポーズラッパー（* フォルダで中身が「絵」だけ）の内部は登録しないが、
+      // フォルダ選択時に必ず見えるよう、内部の最上位レイヤーを表示状態にする
+      // （未使用グループでも実施。後で立ち絵タブから使い始めたときに備える）
+      for (var pw = 0; pw < group.exclusiveLayers.length; pw++) {
+        var pwSrc = group.exclusiveLayers[pw].poseWrapperSource;
+        if (!pwSrc) continue;
+        for (var pl = 1; pl <= pwSrc.numLayers; pl++) {
+          var pwLayer = pwSrc.layer(pl);
+          if (isSystemLayerName(pwLayer.name)) continue;
+          // 反転素材（:flipx 等）は base と二重表示になるため非表示に正規化する
+          // （過去バージョンが点けてしまった状態も再セットアップで直す）
+          var pwParsed = parsePsdLayerName(pwLayer.name);
+          try {
+            pwLayer.enabled = !(pwParsed.flipx || pwParsed.flipy);
+          } catch (ePw) {}
+        }
+      }
+
+      // 制御レイヤーが無いグループ＝未使用としてパス（名前の正規化だけ行う）。
+      // ※ 立ち絵タブのルート候補は「制御レイヤーを持つ or PSD 由来ルート」なので、
+      //   何も登録しなくてもタブから使い始められる（rebuildStageRootDropdown）
+      // 式の登録・制御レイヤー作成は立ち絵タブで使ったときに行われる
+      // （ensureCtrlLayerForNode）。使用中のグループだけ式を最新へ更新する。
+      var existingCtrl = findCtrlLayerInComp(ctrlComp, comp.name, 0);
+      if (!existingCtrl) {
+        if (
+          group.exclusiveLayers.length > 0 ||
+          group.optionalLayers.length > 0
+        ) {
+          report.passed++;
+        }
         continue;
       }
       report.groupCount++;
 
-      // 同一実行で作る制御ヌルは作成順に並べる（最上位配置は維持）
+      // 既存制御ヌルの不可視化メンテナンス＋作成順の維持
       prevCtrlNull = createCtrlLayer(ctrlComp, comp.name, prevCtrlNull);
 
       // 排他（*）＋任意指定（無印）＋ペア反転を同じ式で登録
@@ -500,20 +838,6 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
         layersToRegister,
         "EmoLabMaker: PSDセットアップ登録",
       );
-
-      // ポーズラッパー（* フォルダで中身が「絵」だけ）の内部は登録しないが、
-      // フォルダ選択時に必ず見えるよう、内部の最上位レイヤーを表示状態にする。
-      for (var pw = 0; pw < group.exclusiveLayers.length; pw++) {
-        var pwSrc = group.exclusiveLayers[pw].poseWrapperSource;
-        if (!pwSrc) continue;
-        for (var pl = 1; pl <= pwSrc.numLayers; pl++) {
-          var pwLayer = pwSrc.layer(pl);
-          if (isSystemLayerName(pwLayer.name)) continue;
-          try {
-            pwLayer.enabled = true;
-          } catch (ePw) {}
-        }
-      }
 
       // 既定の表示中集合マーカー（初回・マーカー皆無時のみ）
       // = 既定ラジオ（表示状態の排他）＋ 表示状態の任意指定（完全名）
