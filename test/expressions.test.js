@@ -180,3 +180,38 @@ describe("システムレイヤー判定", function () {
     assert.equal(sandbox.isSystemLayerName("*口あ"), false);
   });
 });
+
+describe("字幕式の上書き判定", function () {
+  function textLayerWithExpression(expr) {
+    var sourceText = { expression: expr };
+    return {
+      property: function (name) {
+        if (name === "ADBE Text Properties") {
+          return {
+            property: function () {
+              return sourceText;
+            },
+          };
+        }
+        return null;
+      },
+    };
+  }
+
+  it("式なし・字幕式は上書き確認の対象外", function () {
+    assert.equal(sandbox.hasUnmanagedSubtitleExpression(textLayerWithExpression("")), false);
+    assert.equal(
+      sandbox.hasUnmanagedSubtitleExpression(
+        textLayerWithExpression(sandbox.buildSubtitleExpression()),
+      ),
+      false,
+    );
+  });
+
+  it("既存の別Source Text式は上書き確認の対象", function () {
+    assert.equal(
+      sandbox.hasUnmanagedSubtitleExpression(textLayerWithExpression("timeToFrames(time);")),
+      true,
+    );
+  });
+});

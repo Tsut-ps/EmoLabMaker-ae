@@ -648,6 +648,15 @@ function buildSubtitleExpression() {
   ].join("\n");
 }
 
+// 字幕式の付与で上書きされる、EmoLabMaker 管理外の Source Text 式があるか。
+function hasUnmanagedSubtitleExpression(layer) {
+  var expr = "";
+  try {
+    expr = getSourceTextProp(layer).expression || "";
+  } catch (e) {}
+  return expr !== "" && expr.indexOf(SUBTITLE_SIGNATURE) < 0;
+}
+
 // テキストレイヤーに字幕式が無ければ付与する（マーカーから本文を引く）。
 function ensureSubtitleExpression(layer) {
   var prop = getSourceTextProp(layer);

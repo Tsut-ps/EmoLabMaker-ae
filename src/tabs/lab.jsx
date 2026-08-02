@@ -77,14 +77,26 @@ bulkPanel.add(
   "txtはUTF-8。字幕は時間ごとに切替（後から分割・編集可）",
 );
 
-// 選択中の最初のテキストレイヤー（字幕の付与先）。無ければ null（alert しない）。
+// 選択中の最初のテキストレイヤー（字幕の付与先）。システムレイヤーは対象外。
 function findSelectedTextLayer(comp) {
   if (!comp) return null;
   var sel = comp.selectedLayers;
   for (var i = 0; i < sel.length; i++) {
-    if (sel[i] instanceof TextLayer) return sel[i];
+    if (!(sel[i] instanceof TextLayer)) continue;
+    if (isSystemLayerName(sel[i].name)) continue;
+    return sel[i];
   }
   return null;
+}
+
+function confirmSubtitleOverwrite(layer) {
+  if (!hasUnmanagedSubtitleExpression(layer)) return true;
+  return confirm(
+    "テキストレイヤー「" +
+      layer.name +
+      "」の既存の Source Text エクスプレッションを上書きして、字幕を付与します。" +
+      "\n続行しますか？",
+  );
 }
 
 // A方式: wav/txt/lab を複数選択して一括配置
@@ -106,7 +118,12 @@ bulkPickBtn.onClick = function () {
     alert("wav / txt / lab が選択されていません");
     return;
   }
+  var hasTxt = false;
+  for (var gi = 0; gi < groups.length; gi++) {
+    if (groups[gi].txt) hasTxt = true;
+  }
   var subtitleLayer = findSelectedTextLayer(comp); // 字幕の付与先（無ければ txt はスキップ）
+  if (hasTxt && subtitleLayer && !confirmSubtitleOverwrite(subtitleLayer)) return;
   var t = readLabTimings();
   var opts = {
     wav: true,
@@ -117,10 +134,6 @@ bulkPickBtn.onClick = function () {
     subtitleLayer: subtitleLayer,
   };
   var total = { wav: 0, txt: 0, lab: 0 };
-  var hasTxt = false;
-  for (var gi = 0; gi < groups.length; gi++) {
-    if (groups[gi].txt) hasTxt = true;
-  }
   beginUndo("lab2layer: ファイル一括読み込み");
   try {
     for (var i = 0; i < groups.length; i++) {
@@ -160,6 +173,7 @@ bulkSiblingBtn.onClick = function () {
   // ソースファイルを持つ選択レイヤーを全て対象にする
   var sel = comp.selectedLayers;
   var targets = [];
+  var hasSiblingTxt = false;
   for (var i = 0; i < sel.length; i++) {
     var f = null;
     try {
@@ -168,13 +182,20 @@ bulkSiblingBtn.onClick = function () {
         sel[i].source.mainSource &&
         sel[i].source.mainSource.file;
     } catch (e) {}
-    if (f) targets.push({ layer: sel[i], file: f });
+    if (f) {
+      var base = fileBaseNoExt(decodeURI(f.name));
+      var labFile = new File(f.parent.fsName + "/" + base + ".lab");
+      var txtFile = new File(f.parent.fsName + "/" + base + ".txt");
+      targets.push({ layer: sel[i], lab: labFile, txt: txtFile });
+      if (txtFile.exists) hasSiblingTxt = true;
+    }
   }
   if (targets.length === 0) {
     alert("ソースファイルのある音声/映像レイヤーを選択してください（複数可）");
     return;
   }
   var subtitleLayer = findSelectedTextLayer(comp); // 字幕の付与先（無ければ txt はスキップ）
+  if (hasSiblingTxt && subtitleLayer && !confirmSubtitleOverwrite(subtitleLayer)) return;
   var t = readLabTimings();
   var labCount = 0;
   var txtCount = 0;
@@ -183,11 +204,8 @@ bulkSiblingBtn.onClick = function () {
   try {
     for (var k = 0; k < targets.length; k++) {
       var layer = targets[k].layer;
-      var srcFile = targets[k].file;
-      var base = fileBaseNoExt(decodeURI(srcFile.name));
-      var parent = srcFile.parent;
-      var labF = new File(parent.fsName + "/" + base + ".lab");
-      var txtF = new File(parent.fsName + "/" + base + ".txt");
+      var labF = targets[k].lab;
+      var txtF = targets[k].txt;
       var attach = layer.inPoint;
       var any = false;
       if (labF.exists) {
