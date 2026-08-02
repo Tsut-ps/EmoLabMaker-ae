@@ -24,6 +24,20 @@ function getSelectedComp(dropdown) {
   return dropdown.selection ? findCompByName(dropdown.selection.text) : null;
 }
 
+/** プロジェクト内に同名コンポが複数あるかを返す。 */
+function hasDuplicateCompName(name) {
+  if (!name) return false;
+  var comps = getProjectComps();
+  var found = 0;
+  for (var i = 0; i < comps.length; i++) {
+    if (comps[i].name !== name) continue;
+    found++;
+    // 2 件目が見つかった時点で重複と判断
+    if (found > 1) return true;
+  }
+  return false;
+}
+
 // ══════════════════════════════════════════════════════════════════
 // 制御レイヤー ユーティリティ
 // ══════════════════════════════════════════════════════════════════
@@ -103,4 +117,3 @@ function createCtrlLayer(ctrlComp, targetCompName, afterLayer) {
   hideCtrlLayer(layer, name);
   return layer;
 }
-

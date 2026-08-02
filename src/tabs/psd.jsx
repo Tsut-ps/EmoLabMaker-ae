@@ -778,6 +778,20 @@ psdSetupBtn.onClick = function () {
     return;
   }
 
+  var duplicateRoot = hasDuplicateCompName(rootComp.name);
+  var duplicateCtrl = hasDuplicateCompName(ctrlComp.name);
+  if (duplicateRoot || duplicateCtrl) {
+    var duplicateTarget = duplicateRoot ? "〈ルート〉" : "〈制御〉";
+    if (duplicateRoot && duplicateCtrl) duplicateTarget = "〈ルート〉と〈制御〉";
+    alert(
+      duplicateTarget +
+        "で選択したコンポと同じ名前のコンポが複数あります。" +
+        "\nコンポ名をそれぞれ異なる名前に変更してから、もう一度セットアップしてください。",
+    );
+    psdStatusText.text = "同名コンポがあるためキャンセルしました。";
+    return;
+  }
+
   var groups = scanPsdCompTree(rootComp);
   if (groups.length === 0) {
     alert(

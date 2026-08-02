@@ -47,6 +47,19 @@ function buildProject() {
   };
 }
 
+describe("hasDuplicateCompName", function () {
+  it("同名コンポが複数ある場合だけ true を返す", function () {
+    var rootA = h.makeComp("立ち絵", [], 30);
+    var rootB = h.makeComp("立ち絵", [], 30);
+    var ctrl = h.makeComp("制御", [], 30);
+    h.registerComps(sandbox, [rootA, rootB, ctrl]);
+
+    assert.equal(sandbox.hasDuplicateCompName("立ち絵"), true);
+    assert.equal(sandbox.hasDuplicateCompName("制御"), false);
+    assert.equal(sandbox.hasDuplicateCompName("存在しない"), false);
+  });
+});
+
 describe("scanPsdCompTree", function () {
   it("子グループが親より先に並ぶ（リネーム順序の前提）", function () {
     var p = buildProject();
