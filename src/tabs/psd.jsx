@@ -810,6 +810,10 @@ psdSetupBtn.onClick = function () {
   checkExpressionEngine();
 
   var report = autoSetupPsd(rootComp, ctrlComp, groups);
+  if (!report) {
+    psdStatusText.text = "キャンセルしました。";
+    return;
+  }
 
   refreshPsdDropdowns();
 

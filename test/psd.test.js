@@ -340,17 +340,22 @@ describe("autoSetupPsd（新方式: 名前の正規化＋使用中のみ更新�
       forcedChoices: [],
     };
     sandbox.ensureNodeRegistered(node);
+    var rootCommentBefore = p.root.comment;
+    var eyeNameBefore = p.eye.name;
+    var expressionBefore = p.flOpen.transform.opacity.expression;
 
     sandbox.__confirmResult = false; // キャンセル
     var report = sandbox.autoSetupPsd(p.root, ctrl2, sandbox.scanPsdCompTree(p.root));
     sandbox.__confirmResult = true; // 後続テストへ戻す
 
-    assert.equal(report.ctrlMigrated, 0);
+    assert.equal(report, null, "セットアップ全体がキャンセルされる");
+    assert.equal(p.root.comment, rootCommentBefore, "セットアップタグを変更しない");
+    assert.equal(p.eye.name, eyeNameBefore, "コンポ名を変更しない");
     assert.ok(
-      sandbox.findCtrlLayerInComp(p.root, "ゆかり_目", 0) !== null,
+      sandbox.findCtrlLayerInComp(p.root, eyeNameBefore, 0) !== null,
       "制御レイヤーは旧側に残る",
     );
-    assert.equal(h.plain(sandbox.parseEmoContext(p.flOpen)).ctrlCompName, "ゆかり", "式も従来のまま");
+    assert.equal(p.flOpen.transform.opacity.expression, expressionBefore, "式も従来のまま");
   });
 
   it("replaceSetToken: 完全一致トークンのみ置換する", function () {

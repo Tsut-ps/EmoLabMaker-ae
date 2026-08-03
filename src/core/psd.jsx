@@ -631,32 +631,36 @@ function autoSetupPsd(rootComp, ctrlComp, groups) {
     commaNames: [],
   };
 
-  beginUndo("EmoLabMaker: PSDセットアップ");
-  try {
-    // 制御コンポの移行: 選択と異なる場所に既存の制御レイヤーがあれば、
-    // 確認のうえマーカーごと移動し、式の参照も新コンポ名へ置換する
-    var foreign = collectForeignCtrlLayers(ctrlComp, groups);
-    if (foreign.length > 0) {
-      var fromNames = [];
-      var fromSeen = {};
-      for (var fn = 0; fn < foreign.length; fn++) {
-        if (!fromSeen[foreign[fn].fromComp.id]) {
-          fromSeen[foreign[fn].fromComp.id] = true;
-          fromNames.push(foreign[fn].fromComp.name);
-        }
+  // 制御コンポの移行を拒否した場合は、タグ更新やリネームも行わず全体を中止する。
+  var foreign = collectForeignCtrlLayers(ctrlComp, groups);
+  if (foreign.length > 0) {
+    var fromNames = [];
+    var fromSeen = {};
+    for (var fn = 0; fn < foreign.length; fn++) {
+      if (!fromSeen[foreign[fn].fromComp.id]) {
+        fromSeen[foreign[fn].fromComp.id] = true;
+        fromNames.push(foreign[fn].fromComp.name);
       }
-      var doMigrate = confirm(
+    }
+    if (
+      !confirm(
         "既存の制御レイヤー " +
           foreign.length +
           " 件が別のコンポ（" +
           fromNames.join(", ") +
           "）にあります。\n「" +
           ctrlComp.name +
-          "」へ移行しますか？\n（いいえ: 現在の場所のまま使い続けます）",
-      );
-      if (doMigrate) {
-        report.ctrlMigrated = migrateCtrlLayersTo(foreign, ctrlComp);
-      }
+          "」へ移行してセットアップを続けますか？\n（いいえ: セットアップをキャンセル）",
+      )
+    ) {
+      return null;
+    }
+  }
+
+  beginUndo("EmoLabMaker: PSDセットアップ");
+  try {
+    if (foreign.length > 0) {
+      report.ctrlMigrated = migrateCtrlLayersTo(foreign, ctrlComp);
     }
 
     // セットアップ済みタグ（立ち絵タブのルート候補に載せる）＋制御コンポの指定
